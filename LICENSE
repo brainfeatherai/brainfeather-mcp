@@ -1,0 +1,16 @@
+Copyright (c) 2026 Brainfeather. All rights reserved.
+
+This software and its source code are proprietary and confidential.
+
+No licence, express or implied, is granted to any person or entity to use,
+copy, modify, merge, publish, distribute, sublicense, or sell copies of this
+software or any portion of it, nor to create derivative works from it.
+
+This repository may be publicly readable. Being able to read it does not grant
+any right to use its contents. The absence of an open-source licence is
+deliberate: this is not open-source software.
+
+Third-party dependencies listed in package.json remain subject to their own
+respective licences, which are not affected by this notice.
+
+For licensing enquiries, contact getbrainfeather@gmail.com.

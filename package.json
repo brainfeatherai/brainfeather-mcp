@@ -1,0 +1,52 @@
+{
+  "name": "@brainfeather/mcp",
+  "version": "1.0.0",
+  "description": "Long-term memory for AI coding agents. Facts recorded once, recalled by every client.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "memory",
+    "ai-agents",
+    "claude",
+    "cursor",
+    "llm"
+  ],
+  "homepage": "https://brainfeather.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brainfeatherai/brainfeather-mcp.git"
+  },
+  "bugs": "https://github.com/brainfeatherai/brainfeather-mcp/issues",
+  "author": "Brainfeather",
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "brainfeather-mcp": "dist/index.js"
+  },
+  "//files": "Whitelist, not .npmignore: only these ship. Prevents src, tests and stray build artifacts reaching the registry.",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "//engines": "Node 18 is the floor because global fetch lands there — the client uses it with no polyfill.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "//prepublishOnly": "Rebuilds from a clean dist so a stale artifact from a deleted source file cannot ship.",
+    "prepublishOnly": "npm run clean && npm run build",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
