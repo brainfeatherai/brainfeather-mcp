@@ -14,25 +14,36 @@
    fixable without a release.
    ──────────────────────────────────────────────────────────────── */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type Config = {
   apiKey: string;
   apiUrl: string;
+  projectId?: string;
 };
 
 const DEFAULT_API_URL = "https://brainfeather.com/api/v1";
-const KEY_PATTERN = /^bf_(live|test)_[A-Za-z0-9]{16,}$/;
+const KEY_PATTERN = /^bf_(?:(?:live|test)_[A-Za-z0-9]{16,128}|[A-Fa-f0-9]{16,128})$/;
+
+export function isValidApiKey(value: string): boolean {
+  return KEY_PATTERN.test(value);
+}
 
 /* An optional config file, for people who would rather not put a key in
    their editor's settings JSON. Env always wins. */
+const CONFIG_PATH = join(homedir(), ".brainfeather", "config.json");
+
 function fromFile(): Record<string, unknown> {
   try {
-    return JSON.parse(
-      readFileSync(join(homedir(), ".brainfeather", "config.json"), "utf8"),
-    ) as Record<string, unknown>;
+    const mode = statSync(CONFIG_PATH).mode & 0o777;
+    if ((mode & 0o077) !== 0) {
+      console.error(
+        `[brainfeather] WARNING: ${CONFIG_PATH} is readable by other users. Run: chmod 600 ${CONFIG_PATH}`,
+      );
+    }
+    return JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Record<string, unknown>;
   } catch {
     return {};
   }
@@ -80,31 +91,52 @@ export function loadConfig(): Config {
   /* Checked here rather than on first request: a typo surfaces at startup
      with a readable message instead of a 401 mid-conversation, which an
      agent tends to report as "the memory tool is broken". */
-  if (!KEY_PATTERN.test(apiKey)) {
+  if (!isValidApiKey(apiKey)) {
     exit(
       "BRAINFEATHER_API_KEY is not a valid key.",
-      `Expected bf_live_… or bf_test_…, got "${redact(apiKey)}".\n` +
+      `Expected bf_live_…, bf_test_…, or a legacy bf_ key; received ${apiKey.length} characters.\n` +
         "Copy it again from https://brainfeather.com/settings",
     );
   }
 
-  const apiUrl = (
+  const rawApiUrl = (
     str(process.env.BRAINFEATHER_API_URL) ?? str(file.apiUrl) ?? DEFAULT_API_URL
   ).replace(/\/+$/, "");
 
-  if (!/^https?:\/\//.test(apiUrl)) {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawApiUrl);
+  } catch {
     exit(
-      "BRAINFEATHER_API_URL must start with http:// or https://",
-      `Got "${apiUrl}".`,
+      "BRAINFEATHER_API_URL must be a valid URL.",
+      `Got "${rawApiUrl}".`,
     );
   }
 
-  return { apiKey, apiUrl };
-}
+  if (parsedUrl.username || parsedUrl.password) {
+    exit("BRAINFEATHER_API_URL must not contain credentials.", "Use BRAINFEATHER_API_KEY instead.");
+  }
 
-/** Show enough of a key to identify it, never enough to use it. */
-function redact(key: string): string {
-  return key.length <= 12 ? `${key.slice(0, 4)}…` : `${key.slice(0, 11)}…${key.slice(-2)}`;
+  const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(
+    parsedUrl.hostname,
+  );
+  if (parsedUrl.protocol !== "https:" && !(parsedUrl.protocol === "http:" && local)) {
+    exit(
+      "BRAINFEATHER_API_URL must use HTTPS.",
+      "Plain HTTP is accepted only for localhost because it exposes the API key in transit.",
+    );
+  }
+
+  const projectId =
+    str(process.env.BRAINFEATHER_PROJECT_ID) ?? str(file.projectId);
+  if (projectId && (projectId.length > 64 || /[\u0000-\u001f\u007f]/.test(projectId))) {
+    exit(
+      "BRAINFEATHER_PROJECT_ID is invalid.",
+      "Use 1-64 printable characters.",
+    );
+  }
+
+  return { apiKey, apiUrl: parsedUrl.href.replace(/\/+$/, ""), projectId };
 }
 
 function exit(headline: string, detail: string): never {
