@@ -78,6 +78,50 @@ describe("Client", () => {
     ).rejects.toThrow("unexpected response shape");
   });
 
+  it("sends project-scoped search options and preserves API ranking order", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        memories: [
+          {
+            $id: "ranked-first",
+            content: "Supabase RLS policies enforce permissions.",
+            category: "decision",
+            source: "manual",
+          },
+          {
+            $id: "ranked-second",
+            content: "Authentication uses sessions.",
+            category: "decision",
+            source: "manual",
+          },
+        ],
+        count: 2,
+      }),
+    );
+    const client = new Client(config, fetchMock);
+
+    const result = await client.searchMemories("how do we handle auth", {
+      category: "decision",
+      projectId: "github.com/acme/app",
+      limit: 7,
+      strictScope: true,
+    });
+
+    expect(result.memories.map((memory) => memory.$id)).toEqual([
+      "ranked-first",
+      "ranked-second",
+    ]);
+    const requested = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requested.pathname).toBe("/api/v1/memories/search");
+    expect(Object.fromEntries(requested.searchParams)).toEqual({
+      q: "how do we handle auth",
+      category: "decision",
+      projectId: "github.com/acme/app",
+      limit: "7",
+      strictScope: "true",
+    });
+  });
+
   it("validates successful API response shapes", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(json({ facts: "wrong" }));
     const client = new Client(config, fetchMock);

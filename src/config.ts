@@ -3,7 +3,7 @@
 
    Two environment variables, both matching the documented install:
 
-     BRAINFEATHER_API_KEY   bf_live_… from brainfeather.com/settings
+     BRAINFEATHER_API_KEY   bf_live_… from brainfeather.com/api-keys
      BRAINFEATHER_API_URL   optional; defaults to the hosted API
 
    Deliberately NO database credentials. An earlier design shipped an
@@ -84,7 +84,7 @@ export function loadConfig(): Config {
         '    "args": ["-y", "@brainfeather/mcp"],\n' +
         '    "env": { "BRAINFEATHER_API_KEY": "bf_live_…" }\n' +
         "  }\n\n" +
-        "Generate a key at https://brainfeather.com/settings",
+        "Generate a key at https://brainfeather.com/api-keys",
     );
   }
 
@@ -95,7 +95,7 @@ export function loadConfig(): Config {
     exit(
       "BRAINFEATHER_API_KEY is not a valid key.",
       `Expected bf_live_…, bf_test_…, or a legacy bf_ key; received ${apiKey.length} characters.\n` +
-        "Copy it again from https://brainfeather.com/settings",
+        "Copy it again from https://brainfeather.com/api-keys",
     );
   }
 

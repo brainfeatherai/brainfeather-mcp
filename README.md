@@ -24,7 +24,7 @@ Add to your MCP client config:
 }
 ```
 
-Generate a key at **[brainfeather.com/settings](https://brainfeather.com/settings)**.
+Generate a key at **[brainfeather.com/api-keys](https://brainfeather.com/api-keys)**.
 
 Config file locations:
 

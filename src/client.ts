@@ -177,7 +177,7 @@ export class Client {
 
       if (res.status === 401) {
         throw new ApiError(
-          "Token rejected. It may have been revoked - generate a new one at https://brainfeather.com/settings",
+          "Token rejected. It may have been revoked - generate a new one at https://brainfeather.com/api-keys",
           false,
           401,
         );
