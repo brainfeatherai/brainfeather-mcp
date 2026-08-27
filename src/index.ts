@@ -19,7 +19,7 @@ import {
 import { ProjectResolver, ProjectScopeError } from "./project.js";
 import { cleanMemoryText, secretReason } from "./security.js";
 
-const VERSION = "1.1.0";
+const VERSION = "1.1.1";
 
 const CATEGORIES = [
   "preference",
