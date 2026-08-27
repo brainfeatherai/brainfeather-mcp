@@ -75,6 +75,12 @@ config file is readable by other users, startup warns you to run
 | `list_entities` | Which tools and concepts this project involves |
 | `traverse_graph` | What else a change to one tool touches |
 
+`get_context` optionally accepts `query`, `referenceAt`, and `maxTokens` to compile
+task-relevant, point-in-time context within a prompt budget. `search_memory` accepts
+`referenceAt` for historical truth. `save_memory` can attach validity intervals,
+temporal type, confidence, and evidence provenance such as a commit, file, issue, PR, or
+deployment. Existing calls need no changes.
+
 The same project context is available as the read-only MCP resource
 `brainfeather://context/current`. Tools return both terse text for broad client
 compatibility and validated `structuredContent` for clients that support output schemas.

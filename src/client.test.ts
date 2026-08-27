@@ -105,6 +105,7 @@ describe("Client", () => {
       projectId: "github.com/acme/app",
       limit: 7,
       strictScope: true,
+      referenceAt: "2026-01-01T00:00:00.000Z",
     });
 
     expect(result.memories.map((memory) => memory.$id)).toEqual([
@@ -119,7 +120,58 @@ describe("Client", () => {
       projectId: "github.com/acme/app",
       limit: "7",
       strictScope: "true",
+      referenceAt: "2026-01-01T00:00:00.000Z",
     });
+  });
+
+  it("forwards query-aware context options without changing the response", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        facts: ["Production uses Vercel."],
+        decisions: [],
+        patterns: [],
+        counts: { facts: 1, decisions: 0, patterns: 0, total: 1 },
+      }),
+    );
+    const client = new Client(config, fetchMock);
+
+    await expect(
+      client.getContext("github.com/acme/app", true, undefined, {
+        query: "deployment",
+        referenceAt: "2026-01-01T00:00:00.000Z",
+        maxTokens: 1024,
+      }),
+    ).resolves.toMatchObject({ counts: { total: 1 } });
+
+    const requested = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(Object.fromEntries(requested.searchParams)).toEqual({
+      projectId: "github.com/acme/app",
+      strictScope: "true",
+      query: "deployment",
+      referenceAt: "2026-01-01T00:00:00.000Z",
+      maxTokens: "1024",
+    });
+  });
+
+  it("sends temporal and evidence metadata on saves", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      json({ action: "add", id: "memory-1", reason: "new decision", invalidated: [] }),
+    );
+    const client = new Client(config, fetchMock);
+    const fact = {
+      content: "The API moved to Vercel.",
+      category: "decision",
+      projectId: "github.com/acme/app",
+      observedAt: "2026-01-10T00:00:00.000Z",
+      validFrom: "2026-01-01T00:00:00.000Z",
+      temporalType: "decision" as const,
+      confidence: 0.95,
+      provenance: { type: "commit" as const, reference: "abc123" },
+    };
+
+    await client.saveMemory(fact);
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(JSON.parse(String(init?.body))).toEqual(fact);
   });
 
   it("validates successful API response shapes", async () => {

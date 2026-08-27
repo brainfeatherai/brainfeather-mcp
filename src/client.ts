@@ -253,7 +253,13 @@ export class Client {
 
   searchMemories(
     query: string,
-    opts: { category?: string; projectId?: string; limit?: number; strictScope?: boolean },
+    opts: {
+      category?: string;
+      projectId?: string;
+      limit?: number;
+      strictScope?: boolean;
+      referenceAt?: string;
+    },
     signal?: AbortSignal,
   ) {
     return this.call(
@@ -273,7 +279,17 @@ export class Client {
       title?: string;
       projectId: string;
       supersedesId?: string;
-      provenance: "user_stated";
+      observedAt?: string;
+      validFrom?: string;
+      validTo?: string;
+      temporalType?: "state" | "event" | "plan" | "preference" | "decision" | "absence";
+      confidence?: number;
+      provenance:
+        | "user_stated"
+        | {
+            type: "user" | "agent" | "commit" | "pull_request" | "issue" | "file" | "deployment";
+            reference?: string;
+          };
     },
     signal?: AbortSignal,
   ) {
@@ -290,10 +306,15 @@ export class Client {
     );
   }
 
-  getContext(projectId?: string, strictScope = false, signal?: AbortSignal) {
+  getContext(
+    projectId?: string,
+    strictScope = false,
+    signal?: AbortSignal,
+    options: { query?: string; referenceAt?: string; maxTokens?: number } = {},
+  ) {
     return this.call(
       "GET",
-      `/context${this.query({ projectId, strictScope })}`,
+      `/context${this.query({ projectId, strictScope, ...options })}`,
       contextSchema,
       undefined,
       { signal },
