@@ -45,7 +45,14 @@ describe("Brainfeather MCP protocol", () => {
     const tools = await mcpClient.listTools();
     expect(tools.tools.map((tool) => tool.name)).toHaveLength(6);
 
-    const result = await mcpClient.callTool({ name: "get_context", arguments: {} });
+    const result = await mcpClient.callTool({
+      name: "get_context",
+      arguments: {
+        query: "testing",
+        referenceAt: "2026-01-01T00:00:00Z",
+        maxTokens: 1024,
+      },
+    });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
       projectId: detectProject(process.cwd()),
@@ -58,6 +65,9 @@ describe("Brainfeather MCP protocol", () => {
 
     const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
     expect(requestedUrls.every((url) => url.includes("strictScope=true"))).toBe(true);
+    expect(requestedUrls[0]).toContain("query=testing");
+    expect(requestedUrls[0]).toContain("referenceAt=2026-01-01T00%3A00%3A00.000Z");
+    expect(requestedUrls[0]).toContain("maxTokens=1024");
   });
 
   it("preserves server-ranked search order in MCP structured output", async () => {
