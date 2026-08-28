@@ -13,6 +13,12 @@ export class ApiError extends Error {
   }
 }
 
+const evidenceSchema = z.object({
+  type: z.enum(["user", "agent", "commit", "pull_request", "issue", "file", "deployment"]),
+  reference: z.string().optional(),
+  digest: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
+});
+
 const memorySchema = z
   .object({
     $id: z.string().min(1).optional(),
@@ -23,6 +29,7 @@ const memorySchema = z
     projectId: z.string().nullish(),
     $createdAt: z.string().optional(),
     createdAt: z.string().optional(),
+    evidence: evidenceSchema.nullish(),
   })
   .refine((value) => value.$id || value.id, { message: "memory id is required" })
   .transform((value) => ({
@@ -32,6 +39,7 @@ const memorySchema = z
     source: value.source,
     projectId: value.projectId,
     $createdAt: value.$createdAt ?? value.createdAt,
+    evidence: value.evidence ?? null,
   }));
 
 const entitySchema = z
@@ -72,6 +80,13 @@ const contextSchema = z.object({
     patterns: z.number(),
     total: z.number(),
   }),
+  evidence: z
+    .object({
+      facts: z.array(evidenceSchema.nullable()),
+      decisions: z.array(evidenceSchema.nullable()),
+      patterns: z.array(evidenceSchema.nullable()),
+    })
+    .optional(),
 });
 
 const saveResultSchema = z.discriminatedUnion("action", [
@@ -259,6 +274,7 @@ export class Client {
       limit?: number;
       strictScope?: boolean;
       referenceAt?: string;
+      includeEvidence?: boolean;
     },
     signal?: AbortSignal,
   ) {
@@ -289,6 +305,7 @@ export class Client {
         | {
             type: "user" | "agent" | "commit" | "pull_request" | "issue" | "file" | "deployment";
             reference?: string;
+            digest?: string;
           };
     },
     signal?: AbortSignal,
@@ -310,7 +327,12 @@ export class Client {
     projectId?: string,
     strictScope = false,
     signal?: AbortSignal,
-    options: { query?: string; referenceAt?: string; maxTokens?: number } = {},
+    options: {
+      query?: string;
+      referenceAt?: string;
+      maxTokens?: number;
+      includeEvidence?: boolean;
+    } = {},
   ) {
     return this.call(
       "GET",
@@ -358,3 +380,4 @@ export type Entity = z.infer<typeof entitySchema>;
 export type Edge = z.infer<typeof edgeSchema>;
 export type SaveResult = z.infer<typeof saveResultSchema>;
 export type ContextResult = z.infer<typeof contextSchema>;
+export type Evidence = z.infer<typeof evidenceSchema>;

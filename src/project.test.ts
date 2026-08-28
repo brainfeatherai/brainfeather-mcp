@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -116,8 +117,48 @@ describe("ProjectResolver", () => {
       },
     };
     const resolver = new ProjectResolver(client);
+    const projectId = await resolver.resolve();
+    await expect(resolver.workspaceRoot(projectId)).resolves.toBe(resolve(process.cwd()));
     await resolver.resolve();
-    await resolver.resolve();
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
+  });
+
+  it("returns only a workspace root that still matches the resolved project", async () => {
+    const first = mkdtempSync(join(tmpdir(), "brainfeather-root-first-"));
+    const second = mkdtempSync(join(tmpdir(), "brainfeather-root-second-"));
+    temporaryPaths.push(first, second);
+    let current = first;
+    const client: RootsClient = {
+      getClientCapabilities: () => ({ roots: { listChanged: true } }),
+      listRoots: async () => ({ roots: [{ uri: pathToFileURL(current).href }] }),
+    };
+    const resolver = new ProjectResolver(client);
+    const projectId = await resolver.resolve();
+    current = second;
+
+    await expect(resolver.workspaceRoot(projectId)).resolves.toBeNull();
+  });
+
+  it("does not switch verification to another clone with the same project id", async () => {
+    const first = mkdtempSync(join(tmpdir(), "brainfeather-clone-first-"));
+    const second = mkdtempSync(join(tmpdir(), "brainfeather-clone-second-"));
+    temporaryPaths.push(first, second);
+    for (const path of [first, second]) {
+      execFileSync("git", ["init", "-q"], { cwd: path });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/app.git"], {
+        cwd: path,
+      });
+    }
+    let current = first;
+    const client: RootsClient = {
+      getClientCapabilities: () => ({ roots: { listChanged: true } }),
+      listRoots: async () => ({ roots: [{ uri: pathToFileURL(current).href }] }),
+    };
+    const resolver = new ProjectResolver(client);
+    const projectId = await resolver.resolve();
+    current = second;
+
+    expect(detectProject(second)).toBe(projectId);
+    await expect(resolver.workspaceRoot(projectId)).resolves.toBeNull();
   });
 });

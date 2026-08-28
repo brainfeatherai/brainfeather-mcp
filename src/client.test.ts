@@ -106,6 +106,7 @@ describe("Client", () => {
       limit: 7,
       strictScope: true,
       referenceAt: "2026-01-01T00:00:00.000Z",
+      includeEvidence: true,
     });
 
     expect(result.memories.map((memory) => memory.$id)).toEqual([
@@ -121,6 +122,7 @@ describe("Client", () => {
       limit: "7",
       strictScope: "true",
       referenceAt: "2026-01-01T00:00:00.000Z",
+      includeEvidence: "true",
     });
   });
 
@@ -166,7 +168,11 @@ describe("Client", () => {
       validFrom: "2026-01-01T00:00:00.000Z",
       temporalType: "decision" as const,
       confidence: 0.95,
-      provenance: { type: "commit" as const, reference: "abc123" },
+      provenance: {
+        type: "file" as const,
+        reference: "docs/architecture.md",
+        digest: `sha256:${"a".repeat(64)}`,
+      },
     };
 
     await client.saveMemory(fact);

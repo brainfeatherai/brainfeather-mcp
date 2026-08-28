@@ -81,6 +81,13 @@ task-relevant, point-in-time context within a prompt budget. `search_memory` acc
 temporal type, confidence, and evidence provenance such as a commit, file, issue, PR, or
 deployment. Existing calls need no changes.
 
+File evidence is hashed locally before saving; Brainfeather receives the relative path and
+SHA-256 digest, never the file contents. Recalled file and commit evidence is checked against
+the exact current workspace root and labelled `verified`, `changed`, `missing`, or
+`unverifiable`. Verification blocks path traversal, external symlinks, oversized files, and
+ambiguous workspace roots. Other provenance types remain `unverifiable` until a trusted local
+verifier exists for them.
+
 The same project context is available as the read-only MCP resource
 `brainfeather://context/current`. Tools return both terse text for broad client
 compatibility and validated `structuredContent` for clients that support output schemas.
