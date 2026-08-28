@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,6 +107,8 @@ function rootPath(uri: string): string | null {
 
 export class ProjectResolver {
   private cached: string | undefined;
+  private resolvedProjectId: string | undefined;
+  private resolvedRoot: string | undefined;
   private generation = 0;
 
   constructor(
@@ -116,6 +119,8 @@ export class ProjectResolver {
   invalidate(): void {
     this.generation++;
     this.cached = undefined;
+    this.resolvedProjectId = undefined;
+    this.resolvedRoot = undefined;
   }
 
   async resolve(signal?: AbortSignal): Promise<string> {
@@ -156,6 +161,8 @@ export class ProjectResolver {
         );
       }
       if (generation !== this.generation) return this.resolve(signal);
+      this.resolvedProjectId = projectId;
+      this.resolvedRoot = realpathSync(path);
       if (capabilities.roots.listChanged) this.cached = projectId;
       return projectId;
     }
@@ -163,5 +170,26 @@ export class ProjectResolver {
     throw new ProjectScopeError(
       "This MCP client does not expose workspace roots. Set BRAINFEATHER_PROJECT_ID in the MCP configuration.",
     );
+  }
+
+  async workspaceRoot(projectId: string, signal?: AbortSignal): Promise<string | null> {
+    const capabilities = this.rootsClient.getClientCapabilities();
+    if (!capabilities?.roots) return null;
+    try {
+      const { roots } = await this.rootsClient.listRoots({}, { signal, timeout: 5000 });
+      if (roots.length !== 1) return null;
+      const path = rootPath(roots[0].uri);
+      if (!path) return null;
+      const root = realpathSync(path);
+      if (
+        !this.configuredProjectId &&
+        (this.resolvedProjectId !== projectId || this.resolvedRoot !== root)
+      ) {
+        return null;
+      }
+      return root;
+    } catch {
+      return null;
+    }
   }
 }

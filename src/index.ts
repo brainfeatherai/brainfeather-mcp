@@ -16,10 +16,17 @@ import {
   graphBlock,
   memoryLines,
 } from "./format.js";
+import {
+  EvidenceError,
+  hashFileEvidence,
+  verifyEvidence,
+  type Evidence,
+  type EvidenceVerification,
+} from "./evidence.js";
 import { ProjectResolver, ProjectScopeError } from "./project.js";
 import { cleanMemoryText, secretReason } from "./security.js";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 
 const CATEGORIES = [
   "preference",
@@ -92,11 +99,18 @@ const countsShape = {
   total: z.number(),
 };
 
+const verificationSchema = z.object({
+  status: z.enum(["verified", "changed", "missing", "unverifiable"]),
+  type: z.enum(PROVENANCE_TYPES).optional(),
+  reference: z.string().optional(),
+});
+
 const memoryShape = {
   id: z.string(),
   content: z.string(),
   category: z.string(),
   source: z.string(),
+  verification: verificationSchema,
 };
 
 const entityShape = {
@@ -126,7 +140,11 @@ async function attempt(
     const result = await work();
     return success(result.body, result.data);
   } catch (error) {
-    if (error instanceof ApiError || error instanceof ProjectScopeError) {
+    if (
+      error instanceof ApiError ||
+      error instanceof ProjectScopeError ||
+      error instanceof EvidenceError
+    ) {
       return failure(error.message);
     }
     console.error(
@@ -136,12 +154,30 @@ async function attempt(
   }
 }
 
-function safeContext(ctx: ContextResult) {
+function safeVerification(value: EvidenceVerification): EvidenceVerification {
+  return {
+    ...value,
+    ...(value.reference ? { reference: cleanMemoryText(value.reference) } : {}),
+  };
+}
+
+function safeContext(ctx: ContextResult, workspaceRoot: string | null) {
+  const verify = (evidence: NonNullable<ContextResult["evidence"]>["facts"][number]) =>
+    safeVerification(verifyEvidence(workspaceRoot, evidence));
   return {
     facts: ctx.facts.map(cleanMemoryText),
     decisions: ctx.decisions.map(cleanMemoryText),
     patterns: ctx.patterns.map(cleanMemoryText),
     counts: ctx.counts,
+    verification: {
+      facts: ctx.facts.map((_, index) => verify(ctx.evidence?.facts[index] ?? null)),
+      decisions: ctx.decisions.map((_, index) =>
+        verify(ctx.evidence?.decisions[index] ?? null),
+      ),
+      patterns: ctx.patterns.map((_, index) =>
+        verify(ctx.evidence?.patterns[index] ?? null),
+      ),
+    },
   };
 }
 
@@ -185,17 +221,25 @@ export function createBrainfeatherServer(
         decisions: z.array(z.string()),
         patterns: z.array(z.string()),
         counts: z.object(countsShape),
+        verification: z.object({
+          facts: z.array(verificationSchema),
+          decisions: z.array(verificationSchema),
+          patterns: z.array(verificationSchema),
+        }),
       },
     },
     ({ query, referenceAt, maxTokens }, extra) =>
       attempt(async () => {
         const projectId = await projects.resolve(extra.signal);
+        const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
         const ctx = safeContext(
           await client.getContext(projectId, true, extra.signal, {
             query,
             referenceAt,
             maxTokens,
+            includeEvidence: true,
           }),
+          workspaceRoot,
         );
         return {
           body: contextBlock(ctx),
@@ -226,9 +270,17 @@ export function createBrainfeatherServer(
     ({ query, category, limit, referenceAt }, extra) =>
       attempt(async () => {
         const projectId = await projects.resolve(extra.signal);
+        const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
         const result = await client.searchMemories(
           query,
-          { category, projectId, limit, strictScope: true, referenceAt },
+          {
+            category,
+            projectId,
+            limit,
+            strictScope: true,
+            referenceAt,
+            includeEvidence: true,
+          },
           extra.signal,
         );
         const memories = result.memories.map((memory) => ({
@@ -236,9 +288,15 @@ export function createBrainfeatherServer(
           content: cleanMemoryText(memory.content),
           category: memory.category,
           source: memory.source,
+          verification: safeVerification(verifyEvidence(workspaceRoot, memory.evidence)),
         }));
         return {
-          body: memoryLines(result.memories),
+          body: memoryLines(
+            result.memories.map((memory, index) => ({
+              ...memory,
+              verification: memories[index].verification,
+            })),
+          ),
           data: { projectId, memories },
         };
       }),
@@ -407,13 +465,29 @@ export function createBrainfeatherServer(
         const projectId = await projects.resolve(extra.signal);
         const content = cleanMemoryText(input.content);
         const source = clientSource(server.server.getClientVersion()?.name);
+        let provenance: "user_stated" | Evidence = input.provenance ?? "user_stated";
+        if (provenance !== "user_stated" && provenance.type === "file") {
+          if (!provenance.reference) {
+            throw new EvidenceError("File evidence requires a workspace-relative reference.");
+          }
+          const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
+          if (!workspaceRoot) {
+            throw new EvidenceError(
+              "Brainfeather needs one local filesystem workspace root to hash file evidence.",
+            );
+          }
+          provenance = {
+            ...provenance,
+            digest: hashFileEvidence(workspaceRoot, provenance.reference),
+          };
+        }
         const decision = await client.saveMemory(
           {
             ...input,
             content,
             source,
             projectId,
-            provenance: input.provenance ?? "user_stated",
+            provenance,
           },
           extra.signal,
         );
@@ -459,7 +533,11 @@ export function createBrainfeatherServer(
     },
     async (uri, extra) => {
       const projectId = await projects.resolve(extra.signal);
-      const ctx = safeContext(await client.getContext(projectId, true, extra.signal));
+      const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
+      const ctx = safeContext(
+        await client.getContext(projectId, true, extra.signal, { includeEvidence: true }),
+        workspaceRoot,
+      );
       return {
         contents: [
           {
@@ -492,13 +570,16 @@ export function createBrainfeatherServer(
       let body: string;
       try {
         const projectId = await projects.resolve(extra.signal);
+        const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
         body = contextBlock(
           safeContext(
             await client.getContext(projectId, true, extra.signal, {
               query,
               referenceAt,
               maxTokens: maxTokens === undefined ? undefined : Number(maxTokens),
+              includeEvidence: true,
             }),
+            workspaceRoot,
           ),
         );
       } catch (error) {
