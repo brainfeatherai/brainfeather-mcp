@@ -81,7 +81,7 @@ export function loadConfig(): Config {
       'Add it to your MCP client config:\n\n' +
         '  "brainfeather": {\n' +
         '    "command": "npx",\n' +
-        '    "args": ["-y", "@brainfeather/mcp@1.5.0"],\n' +
+        '    "args": ["-y", "@brainfeather/mcp@1.5.1"],\n' +
         '    "env": { "BRAINFEATHER_API_KEY": "bf_live_…" }\n' +
         "  }\n\n" +
         "Generate a key at https://brainfeather.com/api-keys",

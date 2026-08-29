@@ -19,7 +19,8 @@ type HookInput = {
 };
 
 const MIN_PROMPT = 12;
-const HOOK_TIMEOUT_MS = 6_000;
+const RECALL_TIMEOUT_MS = 4_000;
+const CAPTURE_TIMEOUT_MS = 6_000;
 
 function readJson(raw: string): HookInput {
   try {
@@ -97,8 +98,10 @@ export async function runHook(
       const ctx = await client.getContext(
         projectId,
         Boolean(projectId),
-        AbortSignal.timeout(HOOK_TIMEOUT_MS),
-        query.length >= MIN_PROMPT ? { query, maxTokens: 1200 } : { maxTokens: 1200 },
+        AbortSignal.timeout(RECALL_TIMEOUT_MS),
+        query.length >= MIN_PROMPT
+          ? { query, maxTokens: 800, retry: false }
+          : { maxTokens: 800, retry: false },
       );
       if (!ctx.counts.total) return JSON.stringify(emptyPayload(format));
       return JSON.stringify(recallPayload(format, contextBlock(ctx), event));
@@ -112,7 +115,7 @@ export async function runHook(
         projectId,
         source: format === "claude" ? "claude" : "cursor",
       },
-      AbortSignal.timeout(HOOK_TIMEOUT_MS),
+      AbortSignal.timeout(CAPTURE_TIMEOUT_MS),
     );
     return JSON.stringify(emptyPayload(format));
   } catch {
