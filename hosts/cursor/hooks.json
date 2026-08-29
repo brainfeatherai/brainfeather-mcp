@@ -3,13 +3,13 @@
   "hooks": {
     "beforeSubmitPrompt": [
       {
-        "command": "npx -y @brainfeather/mcp@1.5.0 hook recall",
+        "command": "npx -y @brainfeather/mcp@1.5.1 hook recall",
         "timeout": 8
       }
     ],
     "stop": [
       {
-        "command": "npx -y @brainfeather/mcp@1.5.0 hook capture",
+        "command": "npx -y @brainfeather/mcp@1.5.1 hook capture",
         "timeout": 8
       }
     ]
