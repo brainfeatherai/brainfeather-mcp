@@ -7,13 +7,24 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "./client.js";
-import { createBrainfeatherServer } from "./index.js";
+import { clientSource, createBrainfeatherServer } from "./index.js";
 import { detectProject } from "./project.js";
 
 const config = {
   apiKey: "bf_test_1234567890abcdef",
   apiUrl: "https://brainfeather.example/api/v1",
 };
+
+describe("clientSource", () => {
+  it("attributes OpenCode, Codex, and Antigravity instead of collapsing them to manual", () => {
+    expect(clientSource("opencode")).toBe("opencode");
+    expect(clientSource("OpenCode")).toBe("opencode");
+    expect(clientSource("codex")).toBe("codex");
+    expect(clientSource("antigravity")).toBe("antigravity");
+    expect(clientSource("cursor")).toBe("cursor");
+    expect(clientSource("unknown-host")).toBe("manual");
+  });
+});
 
 describe("Brainfeather MCP protocol", () => {
   const closers: (() => Promise<void>)[] = [];
@@ -53,7 +64,7 @@ describe("Brainfeather MCP protocol", () => {
     closers.push(() => mcpClient.close(), () => server.close());
 
     const tools = await mcpClient.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toHaveLength(6);
+    expect(tools.tools.map((tool) => tool.name)).toHaveLength(7);
 
     const result = await mcpClient.callTool({
       name: "get_context",
@@ -187,5 +198,73 @@ describe("Brainfeather MCP protocol", () => {
       },
     });
     expect(JSON.stringify(savedBody)).not.toContain("private local evidence");
+  });
+
+  it("attributes OpenCode save_memory and queues capture_activity for review", async () => {
+    let savedBody: unknown;
+    let capturedBody: unknown;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body));
+      if (url.includes("/capture")) {
+        capturedBody = body;
+        return Response.json({
+          candidates: 1,
+          queued: 1,
+          saved: 0,
+          duplicates: 0,
+          rejected: 0,
+        });
+      }
+      savedBody = body;
+      return Response.json({
+        action: "add",
+        id: "memory-opencode",
+        reason: "new fact",
+        invalidated: [],
+      });
+    });
+    const server = createBrainfeatherServer(config, new Client(config, fetchMock));
+    const mcpClient = new McpClient(
+      { name: "opencode", version: "1.0.0" },
+      { capabilities: { roots: { listChanged: true } } },
+    );
+    mcpClient.setRequestHandler(ListRootsRequestSchema, async () => ({
+      roots: [{ uri: pathToFileURL(process.cwd()).href }],
+    }));
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await mcpClient.connect(clientTransport);
+    closers.push(() => mcpClient.close(), () => server.close());
+
+    const saved = await mcpClient.callTool({
+      name: "save_memory",
+      arguments: {
+        content: "Node-based app with Xcode.",
+        category: "project",
+      },
+    });
+    expect(saved.isError).not.toBe(true);
+    expect(savedBody).toMatchObject({ source: "opencode" });
+
+    const captured = await mcpClient.callTool({
+      name: "capture_activity",
+      arguments: {
+        activity: "This project uses Xcode for the iOS client.",
+      },
+    });
+    expect(captured.isError).not.toBe(true);
+    expect(captured.structuredContent).toMatchObject({ queued: 1 });
+    expect(captured.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: expect.stringContaining("https://brainfeather.com/review"),
+        }),
+      ]),
+    );
+    expect(capturedBody).toMatchObject({
+      source: "opencode",
+      activity: "This project uses Xcode for the iOS client.",
+    });
   });
 });

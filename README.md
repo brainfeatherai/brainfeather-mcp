@@ -32,7 +32,26 @@ Config file locations:
 |---|---|
 | Claude Code | `~/.claude/settings.json` |
 | Cursor | `~/.cursor/mcp.json` |
+| OpenCode | `opencode.json` / `~/.config/opencode/opencode.json` |
 | Other | see your client's MCP docs |
+
+OpenCode uses a different config shape than Cursor/Claude:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "brainfeather": {
+      "type": "local",
+      "command": ["npx", "-y", "@brainfeather/mcp"],
+      "enabled": true,
+      "environment": {
+        "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
+      }
+    }
+  }
+}
+```
 
 ## Environment
 
@@ -70,7 +89,8 @@ config file is readable by other users, startup warns you to run
 |---|---|
 | `get_context` | Opening a session — loads stack, decisions, conventions |
 | `search_memory` | Before choosing a library or pattern |
-| `save_memory` | The moment a durable fact appears |
+| `save_memory` | The moment a durable fact is explicitly stated or confirmed |
+| `capture_activity` | After inferred stack choices — queues them for dashboard review |
 | `forget_memory` | Something was recorded in error |
 | `list_entities` | Which tools and concepts this project involves |
 | `traverse_graph` | What else a change to one tool touches |
@@ -92,10 +112,14 @@ The same project context is available as the read-only MCP resource
 `brainfeather://context/current`. Tools return both terse text for broad client
 compatibility and validated `structuredContent` for clients that support output schemas.
 
-Six tools, not sixteen. Every tool description sits in the model's context on every
+Seven tools, not sixteen. Every tool description sits in the model's context on every
 turn, so the set is deliberately small — and each description states *when* to call it,
 because the failure mode for a memory server is not a broken tool, it is an agent that
 never invokes one.
+
+`capture_activity` is for inferred facts. They wait in the [review queue](https://brainfeather.com/review)
+until the user approves them; they never enter recall on their own. `save_memory` remains
+the path for facts the user stated or confirmed.
 
 ## What gets stored
 

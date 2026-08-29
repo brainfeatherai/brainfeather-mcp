@@ -103,6 +103,18 @@ const saveResultSchema = z.discriminatedUnion("action", [
 const entityListSchema = z.object({ entities: z.array(entitySchema), count: z.number() });
 const graphSchema = z.object({ entities: z.array(entitySchema), edges: z.array(edgeSchema) });
 const deleteSchema = z.object({ deleted: z.string().min(1) });
+const contextResponseSchema = contextSchema.extend({
+  sessionToken: z.string().min(8).max(4000).optional(),
+  proactiveRecall: z.boolean().optional(),
+});
+const captureResultSchema = z.object({
+  candidates: z.number().int().nonnegative(),
+  queued: z.number().int().nonnegative(),
+  saved: z.number().int().nonnegative(),
+  duplicates: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative(),
+  sessionToken: z.string().min(8).max(4000).optional(),
+});
 
 const TIMEOUT_MS = 30_000;
 const RETRIES = 2;
@@ -136,10 +148,16 @@ function retryAfterMs(value: string | null): number {
 }
 
 export class Client {
+  private sessionToken?: string;
+
   constructor(
     private readonly cfg: Config,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
+
+  private rememberSession(token?: string) {
+    if (token) this.sessionToken = token;
+  }
 
   private async call<Schema extends z.ZodTypeAny>(
     method: string,
@@ -172,6 +190,9 @@ export class Client {
           method,
           headers: {
             Authorization: `Bearer ${this.cfg.apiKey}`,
+            ...(this.sessionToken
+              ? { "x-brainfeather-session": this.sessionToken }
+              : {}),
             ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
           },
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -337,10 +358,38 @@ export class Client {
     return this.call(
       "GET",
       `/context${this.query({ projectId, strictScope, ...options })}`,
-      contextSchema,
+      contextResponseSchema,
       undefined,
       { signal },
-    );
+    ).then((result) => {
+      this.rememberSession(result.sessionToken);
+      return result;
+    });
+  }
+
+  captureActivity(
+    input: {
+      activity: string;
+      projectId?: string;
+      source?: string;
+    },
+    signal?: AbortSignal,
+  ) {
+    return this.call(
+      "POST",
+      "/capture",
+      captureResultSchema,
+      {
+        activity: input.activity,
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.source ? { source: input.source } : {}),
+        ...(this.sessionToken ? { sessionToken: this.sessionToken } : {}),
+      },
+      { signal, retry: false },
+    ).then((result) => {
+      this.rememberSession(result.sessionToken);
+      return result;
+    });
   }
 
   listEntities(
@@ -379,5 +428,6 @@ export type Memory = z.infer<typeof memorySchema>;
 export type Entity = z.infer<typeof entitySchema>;
 export type Edge = z.infer<typeof edgeSchema>;
 export type SaveResult = z.infer<typeof saveResultSchema>;
-export type ContextResult = z.infer<typeof contextSchema>;
+export type ContextResult = z.infer<typeof contextResponseSchema>;
+export type CaptureResult = z.infer<typeof captureResultSchema>;
 export type Evidence = z.infer<typeof evidenceSchema>;
