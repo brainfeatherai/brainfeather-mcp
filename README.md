@@ -8,14 +8,14 @@ have to ask again.
 
 ## Install
 
-Add to your MCP client config:
+Pin the version so clients do not silently roll back to an older cache:
 
 ```json
 {
   "mcpServers": {
     "brainfeather": {
       "command": "npx",
-      "args": ["-y", "@brainfeather/mcp"],
+      "args": ["-y", "@brainfeather/mcp@1.5.0"],
       "env": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
       }
@@ -26,6 +26,17 @@ Add to your MCP client config:
 
 Generate a key at **[brainfeather.com/api-keys](https://brainfeather.com/api-keys)**.
 
+Then install host adapters so recall and capture do not depend on the model remembering
+to call a tool:
+
+```bash
+npx -y @brainfeather/mcp@1.5.0 init
+```
+
+That writes fail-open Cursor hooks, a Claude Code plugin, and an OpenCode plugin.
+Inferred facts still go to the [review queue](https://brainfeather.com/review). They
+never enter recall until you approve them.
+
 Config file locations:
 
 | Client | Path |
@@ -35,15 +46,53 @@ Config file locations:
 | OpenCode | `opencode.json` / `~/.config/opencode/opencode.json` |
 | Other | see your client's MCP docs |
 
-OpenCode uses a different config shape than Cursor/Claude:
+### Cursor / Claude Code (stdio)
+
+Use the JSON block above. Cursor also accepts Streamable HTTP:
+
+```json
+{
+  "mcpServers": {
+    "brainfeather": {
+      "url": "https://brainfeather.com/mcp",
+      "headers": {
+        "Authorization": "Bearer bf_live_your_key_here",
+        "x-brainfeather-project": "github.com/you/your-repo"
+      }
+    }
+  }
+}
+```
+
+HTTP MCP has no workspace roots. Set `x-brainfeather-project` or
+`BRAINFEATHER_PROJECT_ID`. File hashing stays on the local stdio server.
+
+Local HTTP (same tools as stdio):
+
+```bash
+npx -y @brainfeather/mcp@1.5.0 --http --port 8787
+```
+
+### Claude Code plugin
+
+```bash
+claude plugin marketplace add brainfeatherai/brainfeather-mcp
+claude plugin install brainfeather@brainfeather-plugins
+```
+
+Then run `/brainfeather:onboard` in a repository to import `AGENTS.md`, `CLAUDE.md`,
+`.cursorrules`, and `.cursor/rules`.
+
+### OpenCode
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
+  "plugin": ["~/.config/opencode/brainfeather-plugin.mjs"],
   "mcp": {
     "brainfeather": {
       "type": "local",
-      "command": ["npx", "-y", "@brainfeather/mcp"],
+      "command": ["npx", "-y", "@brainfeather/mcp@1.5.0"],
       "enabled": true,
       "environment": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
@@ -52,6 +101,9 @@ OpenCode uses a different config shape than Cursor/Claude:
   }
 }
 ```
+
+`init opencode` copies the plugin file. It injects recalled context into the system
+prompt and queues inferred facts on `session.idle`.
 
 ## Environment
 
@@ -74,10 +126,10 @@ Environment variables take precedence.
 
 If your MCP client exposes one filesystem root, Brainfeather derives a stable project ID
 from that repository's `origin` remote. Local repositories without a remote receive a
-path-hashed ID so unrelated folders with the same name cannot collide. Multi-root or
-otherwise ambiguous sessions fail closed instead of falling back to account-wide data;
-set `BRAINFEATHER_PROJECT_ID` explicitly for those sessions. Clients that do not support
-MCP Roots must also set `BRAINFEATHER_PROJECT_ID` explicitly.
+path-hashed ID so unrelated folders with the same name cannot collide. Multi-root sessions
+fail closed. If the client advertises Roots but cannot list them, Brainfeather falls back
+to the process working directory when that directory is a recognizable project. Clients
+with no Roots support still need `BRAINFEATHER_PROJECT_ID`.
 
 Only HTTPS API URLs are accepted, except `http://localhost` for local development. If the
 config file is readable by other users, startup warns you to run
@@ -91,9 +143,13 @@ config file is readable by other users, startup warns you to run
 | `search_memory` | Before choosing a library or pattern |
 | `save_memory` | The moment a durable fact is explicitly stated or confirmed |
 | `capture_activity` | After inferred stack choices — queues them for dashboard review |
+| `onboard_project` | Once, to import AGENTS.md / CLAUDE.md / editor rules |
 | `forget_memory` | Something was recorded in error |
 | `list_entities` | Which tools and concepts this project involves |
 | `traverse_graph` | What else a change to one tool touches |
+
+Host adapters call `get_context` and `capture_activity` without waiting for the model.
+The tools remain for explicit lookups, corrections, and clients with no hooks.
 
 `get_context` optionally accepts `query`, `referenceAt`, and `maxTokens` to compile
 task-relevant, point-in-time context within a prompt budget. `search_memory` accepts
@@ -108,11 +164,14 @@ the exact current workspace root and labelled `verified`, `changed`, `missing`, 
 ambiguous workspace roots. Other provenance types remain `unverifiable` until a trusted local
 verifier exists for them.
 
-The same project context is available as the read-only MCP resource
-`brainfeather://context/current`. Tools return both terse text for broad client
-compatibility and validated `structuredContent` for clients that support output schemas.
+Read-only resources:
 
-Seven tools, not sixteen. Every tool description sits in the model's context on every
+- `brainfeather://context/current` — recalled project memory
+- `brainfeather://review/pending` — inferred facts waiting at [brainfeather.com/review](https://brainfeather.com/review)
+
+Prompts: `recall`, `onboard`.
+
+Eight tools, not sixteen. Every tool description sits in the model's context on every
 turn, so the set is deliberately small — and each description states *when* to call it,
 because the failure mode for a memory server is not a broken tool, it is an agent that
 never invokes one.
@@ -164,4 +223,5 @@ Node 20.3 or newer.
 
 - [brainfeather.com](https://brainfeather.com)
 - [Dashboard](https://brainfeather.com/dashboard) — browse and edit memories
+- [Review queue](https://brainfeather.com/review) — approve inferred captures
 - [Issues](https://github.com/brainfeatherai/brainfeather-mcp/issues)

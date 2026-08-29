@@ -1,0 +1,38 @@
+{
+  "description": "Brainfeather recall and capture. Fail open. Inferred facts never enter recall until approved.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @brainfeather/mcp@1.5.0 hook recall --format claude",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @brainfeather/mcp@1.5.0 hook recall --format claude",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @brainfeather/mcp@1.5.0 hook capture --format claude",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

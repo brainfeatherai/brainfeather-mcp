@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "npx -y @brainfeather/mcp@1.5.0 hook recall",
+        "timeout": 8
+      }
+    ],
+    "stop": [
+      {
+        "command": "npx -y @brainfeather/mcp@1.5.0 hook capture",
+        "timeout": 8
+      }
+    ]
+  }
+}
