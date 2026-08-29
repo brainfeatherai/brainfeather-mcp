@@ -200,4 +200,65 @@ describe("Client", () => {
     );
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it("round-trips session tokens from context into capture", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json({
+          facts: [],
+          decisions: [],
+          patterns: [],
+          counts: { facts: 0, decisions: 0, patterns: 0, total: 0 },
+          sessionToken: "session.token.value",
+          proactiveRecall: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          candidates: 1,
+          queued: 1,
+          saved: 0,
+          duplicates: 0,
+          rejected: 0,
+          sessionToken: "session.token.value.2",
+        }),
+      );
+    const client = new Client(config, fetchMock);
+
+    await client.getContext("github.com/acme/app", true);
+    await client.captureActivity({
+      activity: "This project uses Vitest for unit tests.",
+      projectId: "github.com/acme/app",
+      source: "opencode",
+    });
+
+    const contextHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(contextHeaders.get("x-brainfeather-session")).toBeNull();
+
+    const captureInit = fetchMock.mock.calls[1]?.[1];
+    const captureHeaders = new Headers(captureInit?.headers);
+    expect(captureHeaders.get("x-brainfeather-session")).toBe("session.token.value");
+    expect(JSON.parse(String(captureInit?.body))).toMatchObject({
+      activity: "This project uses Vitest for unit tests.",
+      projectId: "github.com/acme/app",
+      source: "opencode",
+      sessionToken: "session.token.value",
+    });
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "https://brainfeather.example/api/v1/capture",
+    );
+  });
+
+  it("does not retry capture after a transient failure", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(json({ error: "gateway timeout" }, { status: 504 }));
+    const client = new Client(config, fetchMock);
+
+    await expect(
+      client.captureActivity({ activity: "This project uses Vitest." }),
+    ).rejects.toMatchObject({ retryable: true, status: 504 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });
