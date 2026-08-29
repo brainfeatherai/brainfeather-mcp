@@ -1,0 +1,16 @@
+{
+  "name": "brainfeather-plugins",
+  "owner": {
+    "name": "Brainfeather"
+  },
+  "metadata": {
+    "description": "Long-term memory for AI coding agents. Recall on every prompt, queue inferred facts for review."
+  },
+  "plugins": [
+    {
+      "name": "brainfeather",
+      "source": "./hosts/claude",
+      "description": "Brainfeather memory: session recall, capture review, and /brainfeather:onboard."
+    }
+  ]
+}

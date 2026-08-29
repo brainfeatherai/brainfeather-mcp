@@ -134,16 +134,24 @@ export class ProjectResolver {
       try {
         ({ roots } = await this.rootsClient.listRoots({}, { signal, timeout: 5000 }));
       } catch {
+        const fallback = this.fallbackFromCwd();
+        if (fallback) return fallback;
         throw new ProjectScopeError(
           "Brainfeather could not read the MCP workspace roots. Retry, or set BRAINFEATHER_PROJECT_ID explicitly.",
         );
       }
 
+      if (roots.length === 0) {
+        const fallback = this.fallbackFromCwd();
+        if (fallback) return fallback;
+        throw new ProjectScopeError(
+          "Brainfeather needs one filesystem workspace root. Open a project or set BRAINFEATHER_PROJECT_ID.",
+        );
+      }
+
       if (roots.length !== 1) {
         throw new ProjectScopeError(
-          roots.length === 0
-            ? "Brainfeather needs one filesystem workspace root. Open a project or set BRAINFEATHER_PROJECT_ID."
-            : "Brainfeather cannot choose safely between multiple workspace roots. Set BRAINFEATHER_PROJECT_ID for this MCP server.",
+          "Brainfeather cannot choose safely between multiple workspace roots. Set BRAINFEATHER_PROJECT_ID for this MCP server.",
         );
       }
 
@@ -172,9 +180,24 @@ export class ProjectResolver {
     );
   }
 
+  private fallbackFromCwd(): string | null {
+    const projectId = detectProject(process.cwd());
+    if (!projectId) return null;
+    try {
+      this.resolvedProjectId = projectId;
+      this.resolvedRoot = realpathSync(process.cwd());
+    } catch {
+      this.resolvedProjectId = projectId;
+    }
+    this.cached = projectId;
+    return projectId;
+  }
+
   async workspaceRoot(projectId: string, signal?: AbortSignal): Promise<string | null> {
     const capabilities = this.rootsClient.getClientCapabilities();
-    if (!capabilities?.roots) return null;
+    if (!capabilities?.roots) {
+      return this.resolvedProjectId === projectId ? (this.resolvedRoot ?? null) : null;
+    }
     try {
       const { roots } = await this.rootsClient.listRoots({}, { signal, timeout: 5000 });
       if (roots.length !== 1) return null;
@@ -189,7 +212,7 @@ export class ProjectResolver {
       }
       return root;
     } catch {
-      return null;
+      return this.resolvedProjectId === projectId ? (this.resolvedRoot ?? null) : null;
     }
   }
 }

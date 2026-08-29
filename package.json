@@ -1,6 +1,6 @@
 {
   "name": "@brainfeather/mcp",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Long-term memory for AI coding agents. Facts recorded once, recalled by every client.",
   "keywords": [
     "mcp",
@@ -26,6 +26,8 @@
   "//files": "Whitelist, not .npmignore: only these ship. Prevents src, tests and stray build artifacts reaching the registry.",
   "files": [
     "dist",
+    "hosts",
+    ".claude-plugin",
     "README.md",
     "LICENSE"
   ],

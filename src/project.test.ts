@@ -98,6 +98,17 @@ describe("ProjectResolver", () => {
     await expect(resolver.resolve()).rejects.toBeInstanceOf(ProjectScopeError);
   });
 
+  it("falls back to the process cwd when advertised roots cannot be listed", async () => {
+    const client: RootsClient = {
+      getClientCapabilities: () => ({ roots: { listChanged: true } }),
+      listRoots: async () => {
+        throw new Error("roots unavailable");
+      },
+    };
+    const resolver = new ProjectResolver(client);
+    await expect(resolver.resolve()).resolves.toBe(detectProject(process.cwd()));
+  });
+
   it("rejects mixed filesystem and virtual roots", async () => {
     const resolver = new ProjectResolver(
       rootsClient([], {

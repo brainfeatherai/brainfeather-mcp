@@ -64,7 +64,19 @@ describe("Brainfeather MCP protocol", () => {
     closers.push(() => mcpClient.close(), () => server.close());
 
     const tools = await mcpClient.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toHaveLength(7);
+    expect(tools.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        "get_context",
+        "search_memory",
+        "save_memory",
+        "capture_activity",
+        "onboard_project",
+        "forget_memory",
+        "list_entities",
+        "traverse_graph",
+      ]),
+    );
+    expect(tools.tools).toHaveLength(8);
 
     const result = await mcpClient.callTool({
       name: "get_context",
@@ -265,6 +277,49 @@ describe("Brainfeather MCP protocol", () => {
     expect(capturedBody).toMatchObject({
       source: "opencode",
       activity: "This project uses Xcode for the iOS client.",
+    });
+  });
+
+  it("onboards instruction-file facts as user-stated file evidence", async () => {
+    const root = mkdtempSync(join(tmpdir(), "brainfeather-onboard-mcp-"));
+    temporaryPaths.push(root);
+    writeFileSync(
+      join(root, "AGENTS.md"),
+      "- This project uses Vitest for unit tests.\n",
+    );
+    let savedBody: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+      savedBody = JSON.parse(String(init?.body));
+      return Response.json({
+        action: "add",
+        id: "memory-onboard",
+        reason: "new fact",
+        invalidated: [],
+      });
+    });
+    const server = createBrainfeatherServer(config, new Client(config, fetchMock));
+    const mcpClient = new McpClient(
+      { name: "cursor", version: "1.0.0" },
+      { capabilities: { roots: { listChanged: true } } },
+    );
+    mcpClient.setRequestHandler(ListRootsRequestSchema, async () => ({
+      roots: [{ uri: pathToFileURL(root).href }],
+    }));
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await mcpClient.connect(clientTransport);
+    closers.push(() => mcpClient.close(), () => server.close());
+
+    const result = await mcpClient.callTool({ name: "onboard_project", arguments: {} });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ saved: 1 });
+    expect(savedBody).toMatchObject({
+      content: "This project uses Vitest for unit tests.",
+      provenance: {
+        type: "file",
+        reference: "AGENTS.md",
+        digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      },
     });
   });
 });

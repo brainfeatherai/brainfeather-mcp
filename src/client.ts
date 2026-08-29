@@ -115,6 +115,18 @@ const captureResultSchema = z.object({
   rejected: z.number().int().nonnegative(),
   sessionToken: z.string().min(8).max(4000).optional(),
 });
+const reviewQueueSchema = z.object({
+  candidates: z.array(
+    z.object({
+      $id: z.string().min(1),
+      content: z.string(),
+      category: z.string(),
+      status: z.string(),
+      projectId: z.string().nullish(),
+      $createdAt: z.string().optional(),
+    }),
+  ),
+});
 
 const TIMEOUT_MS = 30_000;
 const RETRIES = 2;
@@ -402,6 +414,16 @@ export class Client {
       "GET",
       `/entities${this.query({ type, projectId, strictScope })}`,
       entityListSchema,
+      undefined,
+      { signal },
+    );
+  }
+
+  listReviewQueue(projectId?: string, signal?: AbortSignal) {
+    return this.call(
+      "GET",
+      `/memory-candidates${this.query({ status: "pending", projectId, limit: 25 })}`,
+      reviewQueueSchema,
       undefined,
       { signal },
     );
