@@ -365,14 +365,16 @@ export class Client {
       referenceAt?: string;
       maxTokens?: number;
       includeEvidence?: boolean;
+      retry?: boolean;
     } = {},
   ) {
+    const { retry, ...queryOptions } = options;
     return this.call(
       "GET",
-      `/context${this.query({ projectId, strictScope, ...options })}`,
+      `/context${this.query({ projectId, strictScope, ...queryOptions })}`,
       contextResponseSchema,
       undefined,
-      { signal },
+      { signal, retry },
     ).then((result) => {
       this.rememberSession(result.sessionToken);
       return result;
