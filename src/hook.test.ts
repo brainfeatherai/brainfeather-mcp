@@ -28,7 +28,6 @@ describe("runHook", () => {
       additional_context: expect.stringContaining("Backend is Appwrite."),
     });
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("maxTokens=800");
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("branch=");
     expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain("retry=");
 
     const failed = await runHook("recall", "cursor", "{", {

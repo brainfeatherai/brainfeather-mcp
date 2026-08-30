@@ -213,6 +213,7 @@ describe("Brainfeather MCP protocol", () => {
   });
 
   it("attributes OpenCode save_memory and queues capture_activity for review", async () => {
+    const scopedConfig = { ...config, branch: "feature/auth" };
     const savedBodies: Record<string, unknown>[] = [];
     let capturedBody: unknown;
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
@@ -236,7 +237,10 @@ describe("Brainfeather MCP protocol", () => {
         invalidated: [],
       });
     });
-    const server = createBrainfeatherServer(config, new Client(config, fetchMock));
+    const server = createBrainfeatherServer(
+      scopedConfig,
+      new Client(scopedConfig, fetchMock),
+    );
     const mcpClient = new McpClient(
       { name: "opencode", version: "1.0.0" },
       { capabilities: { roots: { listChanged: true } } },
