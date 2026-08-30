@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { RootsListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ApiError, Client, type ContextResult } from "./client.js";
+import { ApiError, Client, type ContextResult, type MemoryScope } from "./client.js";
 import { loadConfig, type Config } from "./config.js";
 import {
   contextBlock,
@@ -23,7 +23,7 @@ import {
   type Evidence,
   type EvidenceVerification,
 } from "./evidence.js";
-import { ProjectResolver, ProjectScopeError } from "./project.js";
+import { detectBranch, ProjectResolver, ProjectScopeError } from "./project.js";
 import { extractOnboardFacts } from "./onboard.js";
 import { cleanMemoryText, secretReason } from "./security.js";
 import { VERSION } from "./version.js";
@@ -78,6 +78,66 @@ const dateTimeSchema = z
   )
   .transform((value) => new Date(value).toISOString());
 
+const scopeIdentifier = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(/^[\x20-\x21\x23-\x5b\x5d-\x7e]+$/, {
+    message: "Use printable ASCII without quotes or backslashes.",
+  });
+
+const taskInput = {
+  taskId: scopeIdentifier
+    .optional()
+    .describe("Current task identifier. Overrides BRAINFEATHER_TASK_ID for this call."),
+};
+
+type ResolvedScope = MemoryScope & { projectId: string; workspaceRoot: string | null };
+
+async function resolveScope(
+  projects: ProjectResolver,
+  config: Config,
+  taskId: string | undefined,
+  signal?: AbortSignal,
+): Promise<ResolvedScope> {
+  const projectId = await projects.resolve(signal);
+  const workspaceRoot = await projects.workspaceRoot(projectId, signal);
+  const branch = config.branch ?? (workspaceRoot ? detectBranch(workspaceRoot) ?? undefined : undefined);
+  return {
+    projectId,
+    workspaceRoot,
+    ...(branch ? { branch } : {}),
+    ...(taskId ?? config.taskId ? { taskId: taskId ?? config.taskId } : {}),
+  };
+}
+
+function selectedWriteScope(
+  scope: "repository" | "branch" | "task" | "branch-task" | undefined,
+  current: ResolvedScope,
+): MemoryScope & { projectId: string } {
+  const selected = scope ?? "repository";
+  if ((selected === "branch" || selected === "branch-task") && !current.branch) {
+    throw new ProjectScopeError(
+      "Brainfeather could not identify the current Git branch. Set BRAINFEATHER_BRANCH or use repository/task scope.",
+    );
+  }
+  if ((selected === "task" || selected === "branch-task") && !current.taskId) {
+    throw new ProjectScopeError(
+      "Task-scoped memory requires taskId or BRAINFEATHER_TASK_ID.",
+    );
+  }
+  return {
+    projectId: current.projectId,
+    ...(selected === "branch" || selected === "branch-task"
+      ? { branch: current.branch }
+      : {}),
+    ...(selected === "task" || selected === "branch-task"
+      ? { taskId: current.taskId }
+      : {}),
+  };
+}
+
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true } as const;
 const WRITE_SAFE = {
   readOnlyHint: false,
@@ -110,6 +170,8 @@ const memoryShape = {
   content: z.string(),
   category: z.string(),
   source: z.string(),
+  branch: z.string().optional(),
+  taskId: z.string().optional(),
   verification: verificationSchema,
 };
 
@@ -219,9 +281,12 @@ export function createBrainfeatherServer(
         query: z.string().trim().min(1).max(200).optional(),
         referenceAt: dateTimeSchema.optional(),
         maxTokens: z.number().int().min(256).max(12_000).optional(),
+        ...taskInput,
       },
       outputSchema: {
         projectId: z.string(),
+        branch: z.string().optional(),
+        taskId: z.string().optional(),
         facts: z.array(z.string()),
         decisions: z.array(z.string()),
         patterns: z.array(z.string()),
@@ -233,22 +298,28 @@ export function createBrainfeatherServer(
         }),
       },
     },
-    ({ query, referenceAt, maxTokens }, extra) =>
+    ({ query, referenceAt, maxTokens, taskId }, extra) =>
       attempt(async () => {
-        const projectId = await projects.resolve(extra.signal);
-        const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
+        const scope = await resolveScope(projects, config, taskId, extra.signal);
         const ctx = safeContext(
-          await client.getContext(projectId, true, extra.signal, {
+          await client.getContext(scope.projectId, true, extra.signal, {
             query,
             referenceAt,
             maxTokens,
             includeEvidence: true,
+            branch: scope.branch,
+            taskId: scope.taskId,
           }),
-          workspaceRoot,
+          scope.workspaceRoot,
         );
         return {
           body: contextBlock(ctx),
-          data: { projectId, ...ctx },
+          data: {
+            projectId: scope.projectId,
+            ...(scope.branch ? { branch: scope.branch } : {}),
+            ...(scope.taskId ? { taskId: scope.taskId } : {}),
+            ...ctx,
+          },
         };
       }),
   );
@@ -266,21 +337,25 @@ export function createBrainfeatherServer(
         category: z.enum(CATEGORIES).optional(),
         limit: z.number().int().min(1).max(25).optional().describe("Default 10."),
         referenceAt: dateTimeSchema.optional().describe("Return facts valid at this time."),
+        ...taskInput,
       },
       outputSchema: {
         projectId: z.string(),
+        branch: z.string().optional(),
+        taskId: z.string().optional(),
         memories: z.array(z.object(memoryShape)),
       },
     },
-    ({ query, category, limit, referenceAt }, extra) =>
+    ({ query, category, limit, referenceAt, taskId }, extra) =>
       attempt(async () => {
-        const projectId = await projects.resolve(extra.signal);
-        const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
+        const scope = await resolveScope(projects, config, taskId, extra.signal);
         const result = await client.searchMemories(
           query,
           {
             category,
-            projectId,
+            projectId: scope.projectId,
+            branch: scope.branch,
+            taskId: scope.taskId,
             limit,
             strictScope: true,
             referenceAt,
@@ -293,7 +368,9 @@ export function createBrainfeatherServer(
           content: cleanMemoryText(memory.content),
           category: memory.category,
           source: memory.source,
-          verification: safeVerification(verifyEvidence(workspaceRoot, memory.evidence)),
+          ...(memory.branch ? { branch: memory.branch } : {}),
+          ...(memory.taskId ? { taskId: memory.taskId } : {}),
+          verification: safeVerification(verifyEvidence(scope.workspaceRoot, memory.evidence)),
         }));
         return {
           body: memoryLines(
@@ -302,7 +379,12 @@ export function createBrainfeatherServer(
               verification: memories[index].verification,
             })),
           ),
-          data: { projectId, memories },
+          data: {
+            projectId: scope.projectId,
+            ...(scope.branch ? { branch: scope.branch } : {}),
+            ...(scope.taskId ? { taskId: scope.taskId } : {}),
+            memories,
+          },
         };
       }),
   );
@@ -316,20 +398,24 @@ export function createBrainfeatherServer(
       annotations: READ_ONLY,
       inputSchema: {
         type: z.enum(ENTITY_TYPES).optional(),
+        ...taskInput,
       },
       outputSchema: {
         projectId: z.string(),
+        branch: z.string().optional(),
+        taskId: z.string().optional(),
         entities: z.array(z.object(entityShape)),
       },
     },
-    ({ type }, extra) =>
+    ({ type, taskId }, extra) =>
       attempt(async () => {
-        const projectId = await projects.resolve(extra.signal);
+        const scope = await resolveScope(projects, config, taskId, extra.signal);
         const result = await client.listEntities(
           type,
-          projectId,
+          scope.projectId,
           true,
           extra.signal,
+          { branch: scope.branch, taskId: scope.taskId },
         );
         const entities = result.entities.map((entity) => ({
           id: entity.$id,
@@ -339,7 +425,12 @@ export function createBrainfeatherServer(
         }));
         return {
           body: entityLines(result.entities),
-          data: { projectId, entities },
+          data: {
+            projectId: scope.projectId,
+            ...(scope.branch ? { branch: scope.branch } : {}),
+            ...(scope.taskId ? { taskId: scope.taskId } : {}),
+            entities,
+          },
         };
       }),
   );
@@ -354,9 +445,12 @@ export function createBrainfeatherServer(
       inputSchema: {
         entityId: z.string().trim().min(1).max(64),
         depth: z.number().int().min(1).max(3).optional(),
+        ...taskInput,
       },
       outputSchema: {
         projectId: z.string(),
+        branch: z.string().optional(),
+        taskId: z.string().optional(),
         entities: z.array(z.object(entityShape)),
         edges: z.array(
           z.object({
@@ -368,20 +462,23 @@ export function createBrainfeatherServer(
         ),
       },
     },
-    ({ entityId, depth }, extra) =>
+    ({ entityId, depth, taskId }, extra) =>
       attempt(async () => {
-        const projectId = await projects.resolve(extra.signal);
+        const scope = await resolveScope(projects, config, taskId, extra.signal);
         const graph = await client.traverse(
           entityId,
           depth,
-          projectId,
+          scope.projectId,
           true,
           extra.signal,
+          { branch: scope.branch, taskId: scope.taskId },
         );
         return {
           body: graphBlock(graph),
           data: {
-            projectId,
+            projectId: scope.projectId,
+            ...(scope.branch ? { branch: scope.branch } : {}),
+            ...(scope.taskId ? { taskId: scope.taskId } : {}),
             entities: graph.entities.map((entity) => ({
               id: entity.$id,
               name: cleanMemoryText(entity.name),
@@ -439,6 +536,13 @@ export function createBrainfeatherServer(
         validTo: dateTimeSchema.optional(),
         temporalType: z.enum(TEMPORAL_TYPES).optional(),
         confidence: z.number().min(0).max(1).optional(),
+        scope: z
+          .enum(["repository", "branch", "task", "branch-task"])
+          .optional()
+          .describe(
+            "Where this fact applies. Defaults to repository. Use branch-task for a task-specific fact that also requires the current branch.",
+          ),
+        ...taskInput,
         provenance: z
           .object({
             type: z.enum(PROVENANCE_TYPES),
@@ -467,7 +571,8 @@ export function createBrainfeatherServer(
     },
     (input, extra) =>
       attempt(async () => {
-        const projectId = await projects.resolve(extra.signal);
+        const currentScope = await resolveScope(projects, config, input.taskId, extra.signal);
+        const writeScope = selectedWriteScope(input.scope, currentScope);
         const content = cleanMemoryText(input.content);
         const source = clientSource(server.server.getClientVersion()?.name);
         let provenance: "user_stated" | Evidence = input.provenance ?? "user_stated";
@@ -475,23 +580,25 @@ export function createBrainfeatherServer(
           if (!provenance.reference) {
             throw new EvidenceError("File evidence requires a workspace-relative reference.");
           }
-          const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
-          if (!workspaceRoot) {
+          if (!currentScope.workspaceRoot) {
             throw new EvidenceError(
               "Brainfeather needs one local filesystem workspace root to hash file evidence.",
             );
           }
           provenance = {
             ...provenance,
-            digest: hashFileEvidence(workspaceRoot, provenance.reference),
+            digest: hashFileEvidence(currentScope.workspaceRoot, provenance.reference),
           };
         }
+        const { scope: _scope, taskId: _taskId, ...fact } = input;
         const decision = await client.saveMemory(
           {
-            ...input,
+            ...fact,
+            taskId: writeScope.taskId,
             content,
             source,
-            projectId,
+            projectId: writeScope.projectId,
+            branch: writeScope.branch,
             provenance,
           },
           extra.signal,
@@ -526,6 +633,7 @@ export function createBrainfeatherServer(
           .refine((value) => !secretReason(value), {
             message: "Activity appears to contain sensitive data.",
           }),
+        ...taskInput,
       },
       outputSchema: {
         candidates: z.number(),
@@ -533,14 +641,16 @@ export function createBrainfeatherServer(
         duplicates: z.number(),
       },
     },
-    ({ activity }, extra) =>
+    ({ activity, taskId }, extra) =>
       attempt(async () => {
-        const projectId = await projects.resolve(extra.signal);
+        const scope = await resolveScope(projects, config, taskId, extra.signal);
         const source = clientSource(server.server.getClientVersion()?.name);
         const result = await client.captureActivity(
           {
             activity: cleanMemoryText(activity),
-            projectId,
+            projectId: scope.projectId,
+            branch: scope.branch,
+            taskId: scope.taskId,
             source,
           },
           extra.signal,
@@ -636,13 +746,24 @@ export function createBrainfeatherServer(
         "The memory must belong to the current workspace. Prefer save_memory with " +
         "supersedesId when a fact changed, because that preserves history.",
       annotations: DESTRUCTIVE,
-      inputSchema: { id: z.string().trim().min(1).max(64) },
+      inputSchema: {
+        id: z.string().trim().min(1).max(64),
+        scope: z
+          .enum(["repository", "branch", "task", "branch-task"])
+          .optional()
+          .describe("Scope of the memory to delete. Defaults to repository-wide lookup."),
+        ...taskInput,
+      },
       outputSchema: { deleted: z.string() },
     },
-    ({ id }, extra) =>
+    ({ id, scope: requestedScope, taskId }, extra) =>
       attempt(async () => {
-        const projectId = await projects.resolve(extra.signal);
-        await client.forgetMemory(id, projectId, extra.signal);
+        const currentScope = await resolveScope(projects, config, taskId, extra.signal);
+        const writeScope = selectedWriteScope(requestedScope, currentScope);
+        await client.forgetMemory(id, writeScope.projectId, extra.signal, {
+          branch: writeScope.branch,
+          taskId: writeScope.taskId,
+        });
         return { body: `Deleted ${id}.`, data: { deleted: id } };
       }),
   );
@@ -657,11 +778,14 @@ export function createBrainfeatherServer(
       mimeType: "text/plain",
     },
     async (uri, extra) => {
-      const projectId = await projects.resolve(extra.signal);
-      const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
+      const scope = await resolveScope(projects, config, undefined, extra.signal);
       const ctx = safeContext(
-        await client.getContext(projectId, true, extra.signal, { includeEvidence: true }),
-        workspaceRoot,
+        await client.getContext(scope.projectId, true, extra.signal, {
+          includeEvidence: true,
+          branch: scope.branch,
+          taskId: scope.taskId,
+        }),
+        scope.workspaceRoot,
       );
       return {
         contents: [
@@ -685,12 +809,13 @@ export function createBrainfeatherServer(
       mimeType: "text/plain",
     },
     async (uri, extra) => {
-      const projectId = await projects.resolve(extra.signal);
+      const scope = await resolveScope(projects, config, undefined, extra.signal);
       try {
-        const queue = await client.listReviewQueue(projectId, extra.signal);
-        const scoped = queue.candidates.filter(
-          (row) => !row.projectId || row.projectId === projectId,
-        );
+        const queue = await client.listReviewQueue(scope.projectId, extra.signal, {
+          branch: scope.branch,
+          taskId: scope.taskId,
+        });
+        const scoped = queue.candidates;
         const text = scoped.length
           ? `Pending review (${scoped.length}). Approve at https://brainfeather.com/review\n${scoped
               .map((row) => `${row.$id} ${row.category} | ${cleanMemoryText(row.content)}`)
@@ -716,6 +841,7 @@ export function createBrainfeatherServer(
       argsSchema: {
         query: z.string().trim().min(1).max(200).optional(),
         referenceAt: dateTimeSchema.optional(),
+        ...taskInput,
         maxTokens: z
           .string()
           .regex(/^\d+$/)
@@ -725,20 +851,21 @@ export function createBrainfeatherServer(
           .optional(),
       },
     },
-    async ({ query, referenceAt, maxTokens }, extra) => {
+    async ({ query, referenceAt, taskId, maxTokens }, extra) => {
       let body: string;
       try {
-        const projectId = await projects.resolve(extra.signal);
-        const workspaceRoot = await projects.workspaceRoot(projectId, extra.signal);
+        const scope = await resolveScope(projects, config, taskId, extra.signal);
         body = contextBlock(
           safeContext(
-            await client.getContext(projectId, true, extra.signal, {
+            await client.getContext(scope.projectId, true, extra.signal, {
               query,
               referenceAt,
               maxTokens: maxTokens === undefined ? undefined : Number(maxTokens),
               includeEvidence: true,
+              branch: scope.branch,
+              taskId: scope.taskId,
             }),
-            workspaceRoot,
+            scope.workspaceRoot,
           ),
         );
       } catch (error) {

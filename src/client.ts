@@ -27,6 +27,8 @@ const memorySchema = z
     category: z.string(),
     source: z.string(),
     projectId: z.string().nullish(),
+    branch: z.string().nullish(),
+    taskId: z.string().nullish(),
     $createdAt: z.string().optional(),
     createdAt: z.string().optional(),
     evidence: evidenceSchema.nullish(),
@@ -38,6 +40,8 @@ const memorySchema = z
     category: value.category,
     source: value.source,
     projectId: value.projectId,
+    branch: value.branch,
+    taskId: value.taskId,
     $createdAt: value.$createdAt ?? value.createdAt,
     evidence: value.evidence ?? null,
   }));
@@ -123,6 +127,8 @@ const reviewQueueSchema = z.object({
       category: z.string(),
       status: z.string(),
       projectId: z.string().nullish(),
+      branch: z.string().nullish(),
+      taskId: z.string().nullish(),
       $createdAt: z.string().optional(),
     }),
   ),
@@ -136,6 +142,12 @@ type CallOptions = {
   signal?: AbortSignal;
   retry?: boolean;
   sessionToken?: string | null;
+};
+
+export type MemoryScope = {
+  projectId?: string;
+  branch?: string;
+  taskId?: string;
 };
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -161,19 +173,34 @@ function retryAfterMs(value: string | null): number {
 }
 
 export class Client {
-  private sessionToken?: string;
+  private readonly sessionTokens = new Map<string, string>();
 
   constructor(
     private readonly cfg: Config,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  private rememberSession(token?: string) {
-    if (token) this.sessionToken = token;
+  private scopeKey(scope: MemoryScope): string {
+    return JSON.stringify([
+      scope.projectId ?? null,
+      scope.branch ?? null,
+      scope.taskId ?? null,
+    ]);
   }
 
-  private clearSession() {
-    this.sessionToken = undefined;
+  private rememberSession(scope: MemoryScope, token?: string) {
+    if (token) this.sessionTokens.set(this.scopeKey(scope), token);
+  }
+
+  private sessionFor(scope: MemoryScope): string | undefined {
+    return this.sessionTokens.get(this.scopeKey(scope));
+  }
+
+  private clearSession(scope: MemoryScope, expected?: string) {
+    const key = this.scopeKey(scope);
+    if (expected === undefined || this.sessionTokens.get(key) === expected) {
+      this.sessionTokens.delete(key);
+    }
   }
 
   private async call<Schema extends z.ZodTypeAny>(
@@ -203,8 +230,7 @@ export class Client {
 
       let res: Response;
       try {
-        const sessionToken =
-          options.sessionToken === undefined ? this.sessionToken : options.sessionToken;
+        const sessionToken = options.sessionToken;
         res = await this.fetchImpl(`${this.cfg.apiUrl}${path}`, {
           method,
           headers: {
@@ -311,6 +337,8 @@ export class Client {
     opts: {
       category?: string;
       projectId?: string;
+      branch?: string;
+      taskId?: string;
       limit?: number;
       strictScope?: boolean;
       referenceAt?: string;
@@ -334,6 +362,8 @@ export class Client {
       source?: string;
       title?: string;
       projectId: string;
+      branch?: string;
+      taskId?: string;
       supersedesId?: string;
       observedAt?: string;
       validFrom?: string;
@@ -353,10 +383,15 @@ export class Client {
     return this.call("POST", "/memories", saveResultSchema, fact, { signal, retry: false });
   }
 
-  forgetMemory(id: string, projectId: string, signal?: AbortSignal) {
+  forgetMemory(
+    id: string,
+    projectId: string,
+    signal?: AbortSignal,
+    scope: Pick<MemoryScope, "branch" | "taskId"> = {},
+  ) {
     return this.call(
       "DELETE",
-      `/memories/${encodeURIComponent(id)}${this.query({ projectId })}`,
+      `/memories/${encodeURIComponent(id)}${this.query({ projectId, ...scope })}`,
       deleteSchema,
       undefined,
       { signal, retry: false },
@@ -373,9 +408,16 @@ export class Client {
       maxTokens?: number;
       includeEvidence?: boolean;
       retry?: boolean;
+      branch?: string;
+      taskId?: string;
     } = {},
   ) {
     const { retry, ...queryOptions } = options;
+    const scope = {
+      projectId,
+      branch: options.branch,
+      taskId: options.taskId,
+    };
     const request = (sessionToken: string | null | undefined) =>
       this.call(
         "GET",
@@ -384,7 +426,7 @@ export class Client {
         undefined,
         { signal, retry, sessionToken },
       );
-    const sentToken = this.sessionToken;
+    const sentToken = this.sessionFor(scope);
     return request(sentToken).catch((error: unknown) => {
       if (
         sentToken &&
@@ -392,12 +434,12 @@ export class Client {
         error.status === 400 &&
         /sessionToken is invalid/i.test(error.message)
       ) {
-        if (this.sessionToken === sentToken) this.clearSession();
-        return request(this.sessionToken ?? null);
+        this.clearSession(scope, sentToken);
+        return request(this.sessionFor(scope) ?? null);
       }
       throw error;
     }).then((result) => {
-      this.rememberSession(result.sessionToken);
+      this.rememberSession(scope, result.sessionToken);
       return result;
     });
   }
@@ -406,6 +448,8 @@ export class Client {
     input: {
       activity: string;
       projectId?: string;
+      branch?: string;
+      taskId?: string;
       source?: string;
     },
     signal?: AbortSignal,
@@ -418,12 +462,19 @@ export class Client {
         {
           activity: input.activity,
           ...(input.projectId ? { projectId: input.projectId } : {}),
+          ...(input.branch ? { branch: input.branch } : {}),
+          ...(input.taskId ? { taskId: input.taskId } : {}),
           ...(input.source ? { source: input.source } : {}),
           ...(sessionToken ? { sessionToken } : {}),
         },
         { signal, retry: false, sessionToken },
       );
-    const sentToken = this.sessionToken;
+    const scope = {
+      projectId: input.projectId,
+      branch: input.branch,
+      taskId: input.taskId,
+    };
+    const sentToken = this.sessionFor(scope);
     return request(sentToken).catch((error: unknown) => {
       if (
         sentToken &&
@@ -431,12 +482,12 @@ export class Client {
         error.status === 400 &&
         /sessionToken is invalid/i.test(error.message)
       ) {
-        if (this.sessionToken === sentToken) this.clearSession();
-        return request(this.sessionToken ?? null);
+        this.clearSession(scope, sentToken);
+        return request(this.sessionFor(scope) ?? null);
       }
       throw error;
     }).then((result) => {
-      this.rememberSession(result.sessionToken);
+      this.rememberSession(scope, result.sessionToken);
       return result;
     });
   }
@@ -446,20 +497,25 @@ export class Client {
     projectId?: string,
     strictScope = false,
     signal?: AbortSignal,
+    scope: Pick<MemoryScope, "branch" | "taskId"> = {},
   ) {
     return this.call(
       "GET",
-      `/entities${this.query({ type, projectId, strictScope })}`,
+      `/entities${this.query({ type, projectId, strictScope, ...scope })}`,
       entityListSchema,
       undefined,
       { signal },
     );
   }
 
-  listReviewQueue(projectId?: string, signal?: AbortSignal) {
+  listReviewQueue(
+    projectId?: string,
+    signal?: AbortSignal,
+    scope: Pick<MemoryScope, "branch" | "taskId"> = {},
+  ) {
     return this.call(
       "GET",
-      `/memory-candidates${this.query({ status: "pending", projectId, limit: 25 })}`,
+      `/memory-candidates${this.query({ status: "pending", projectId, ...scope, limit: 25 })}`,
       reviewQueueSchema,
       undefined,
       { signal },
@@ -472,10 +528,11 @@ export class Client {
     projectId?: string,
     strictScope = false,
     signal?: AbortSignal,
+    scope: Pick<MemoryScope, "branch" | "taskId"> = {},
   ) {
     return this.call(
       "GET",
-      `/graph/traverse/${encodeURIComponent(entityId)}${this.query({ depth, projectId, strictScope })}`,
+      `/graph/traverse/${encodeURIComponent(entityId)}${this.query({ depth, projectId, strictScope, ...scope })}`,
       graphSchema,
       undefined,
       { signal },

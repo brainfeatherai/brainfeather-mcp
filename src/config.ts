@@ -22,6 +22,8 @@ export type Config = {
   apiKey: string;
   apiUrl: string;
   projectId?: string;
+  branch?: string;
+  taskId?: string;
 };
 
 const DEFAULT_API_URL = "https://brainfeather.com/api/v1";
@@ -81,7 +83,7 @@ export function loadConfig(): Config {
       'Add it to your MCP client config:\n\n' +
         '  "brainfeather": {\n' +
         '    "command": "npx",\n' +
-        '    "args": ["-y", "@brainfeather/mcp@1.5.2"],\n' +
+        '    "args": ["-y", "@brainfeather/mcp@1.6.0"],\n' +
         '    "env": { "BRAINFEATHER_API_KEY": "bf_live_…" }\n' +
         "  }\n\n" +
         "Generate a key at https://brainfeather.com/api-keys",
@@ -136,7 +138,30 @@ export function loadConfig(): Config {
     );
   }
 
-  return { apiKey, apiUrl: parsedUrl.href.replace(/\/+$/, ""), projectId };
+  const branch = str(process.env.BRAINFEATHER_BRANCH) ?? str(file.branch);
+  const taskId = str(process.env.BRAINFEATHER_TASK_ID) ?? str(file.taskId);
+  for (const [name, value] of [
+    ["BRAINFEATHER_BRANCH", branch],
+    ["BRAINFEATHER_TASK_ID", taskId],
+  ] as const) {
+    if (
+      value &&
+      (value.length > 128 || !/^[\x20-\x21\x23-\x5b\x5d-\x7e]+$/.test(value))
+    ) {
+      exit(
+        `${name} is invalid.`,
+        "Use 1-128 printable ASCII characters without quotes or backslashes.",
+      );
+    }
+  }
+
+  return {
+    apiKey,
+    apiUrl: parsedUrl.href.replace(/\/+$/, ""),
+    projectId,
+    branch,
+    taskId,
+  };
 }
 
 function exit(headline: string, detail: string): never {

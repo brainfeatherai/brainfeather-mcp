@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { detectProject } from "./project.js";
+import { detectBranch, detectProject } from "./project.js";
 import { contextBlock } from "./format.js";
 import { loadConfig, type Config } from "./config.js";
 import { Client } from "./client.js";
@@ -87,6 +87,8 @@ export async function runHook(
     const client = options.client ?? new Client(config);
     const path = workspacePath(input);
     const projectId = config.projectId ?? detectProject(path) ?? undefined;
+    const branch = config.branch ?? detectBranch(path) ?? undefined;
+    const taskId = config.taskId;
 
     if (name === "recall") {
       const query = promptOf(input);
@@ -100,8 +102,8 @@ export async function runHook(
         Boolean(projectId),
         AbortSignal.timeout(RECALL_TIMEOUT_MS),
         query.length >= MIN_PROMPT
-          ? { query, maxTokens: 800, retry: false }
-          : { maxTokens: 800, retry: false },
+          ? { query, maxTokens: 800, retry: false, branch, taskId }
+          : { maxTokens: 800, retry: false, branch, taskId },
       );
       if (!ctx.counts.total) return JSON.stringify(emptyPayload(format));
       return JSON.stringify(recallPayload(format, contextBlock(ctx), event));
@@ -113,6 +115,8 @@ export async function runHook(
       {
         activity,
         projectId,
+        branch,
+        taskId,
         source: format === "claude" ? "claude" : "cursor",
       },
       AbortSignal.timeout(CAPTURE_TIMEOUT_MS),
