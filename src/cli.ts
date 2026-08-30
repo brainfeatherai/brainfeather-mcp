@@ -8,6 +8,7 @@ export type CliCommand =
 const HOOKS = new Set(["recall", "capture"]);
 const FORMATS = new Set(["cursor", "claude"]);
 const INIT_TARGETS = new Set(["cursor", "claude", "opencode", "all"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
 function flag(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -48,7 +49,13 @@ export function parseArgs(argv: string[]): CliCommand {
   }
 
   if (has(args, "--http") || args[0] === "http") {
-    const host = flag(args, "--host") ?? "127.0.0.1";
+    const requestedHost = flag(args, "--host") ?? "127.0.0.1";
+    if (!LOOPBACK_HOSTS.has(requestedHost.toLowerCase())) {
+      throw new Error(
+        "Local HTTP MCP may only bind to localhost. Use https://brainfeather.com/mcp for remote access.",
+      );
+    }
+    const host = requestedHost === "[::1]" ? "::1" : requestedHost;
     const port = Number(flag(args, "--port") ?? "8787");
     if (!Number.isInteger(port) || port < 1 || port > 65_535) {
       throw new Error("--port must be an integer from 1 to 65535.");

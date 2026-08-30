@@ -86,8 +86,31 @@ export function installHostAdapters(
   }
 
   if (wants.includes("opencode")) {
-    const pluginPath = join(home, ".config", "opencode", "brainfeather-plugin.mjs");
+    const configDir = join(home, ".config", "opencode");
+    const pluginPath = join(configDir, "plugins", "brainfeather.mjs");
     writeFile(pluginPath, readTemplate("hosts/opencode/plugin.mjs"));
+    writeFile(
+      join(configDir, "brainfeather-plugin.mjs"),
+      "// Retired Brainfeather plugin path. The adapter is auto-discovered from plugins/.\nexport default async () => ({});\n",
+    );
+    const configPath = join(configDir, "opencode.json");
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+        plugin?: unknown[];
+      };
+      if (Array.isArray(config.plugin)) {
+        const next = config.plugin.filter(
+          (entry) =>
+            typeof entry !== "string" ||
+            !entry.replaceAll("\\", "/").endsWith("/brainfeather-plugin.mjs"),
+        );
+        if (next.length !== config.plugin.length) {
+          writeFile(configPath, `${JSON.stringify({ ...config, plugin: next }, null, 2)}\n`);
+        }
+      }
+    } catch {
+      /* JSONC and project configs are left untouched; auto-discovery still works. */
+    }
     written.push(pluginPath);
   }
 

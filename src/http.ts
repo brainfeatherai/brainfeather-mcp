@@ -4,12 +4,40 @@ import type { Config } from "./config.js";
 import { createBrainfeatherServer } from "./index.js";
 
 const CORS = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
     "Authorization, Content-Type, Accept, Mcp-Session-Id, Last-Event-Id, x-brainfeather-project",
   "Access-Control-Expose-Headers": "Mcp-Session-Id",
 };
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+function loopbackHost(value: string): boolean {
+  if (value === "::1" || value === "[::1]") return true;
+  try {
+    return LOOPBACK_HOSTS.has(new URL(`http://${value}`).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function allowedOrigin(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const origin = new URL(value);
+    return (origin.protocol === "http:" || origin.protocol === "https:") &&
+      LOOPBACK_HOSTS.has(origin.hostname)
+      ? origin.origin
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function responseHeaders(request: Request): HeadersInit {
+  const origin = allowedOrigin(request.headers.get("origin"));
+  return { ...CORS, ...(origin ? { "Access-Control-Allow-Origin": origin } : {}) };
+}
 
 function webHeaders(incoming: IncomingHttpHeaders): Headers {
   const headers = new Headers();
@@ -28,8 +56,22 @@ export async function handleStreamableRequest(
   request: Request,
   config: Config,
 ): Promise<Response> {
+  const host = request.headers.get("host") ?? new URL(request.url).host;
+  if (!loopbackHost(host)) {
+    return Response.json(
+      { jsonrpc: "2.0", error: { code: -32_000, message: "Invalid Host header." }, id: null },
+      { status: 403 },
+    );
+  }
+  const origin = request.headers.get("origin");
+  if (origin && !allowedOrigin(origin)) {
+    return Response.json(
+      { jsonrpc: "2.0", error: { code: -32_000, message: "Invalid Origin header." }, id: null },
+      { status: 403 },
+    );
+  }
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS });
+    return new Response(null, { status: 204, headers: responseHeaders(request) });
   }
 
   const projectId =
@@ -37,17 +79,26 @@ export async function handleStreamableRequest(
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
-    enableDnsRebindingProtection: false,
+    enableDnsRebindingProtection: true,
+    allowedHosts: [host],
+    ...(origin ? { allowedOrigins: [origin] } : {}),
   });
   const server = createBrainfeatherServer({ ...config, projectId });
   await server.connect(transport);
   const response = await transport.handleRequest(request);
   const headers = new Headers(response.headers);
-  for (const [key, value] of Object.entries(CORS)) headers.set(key, value);
+  for (const [key, value] of Object.entries(responseHeaders(request))) headers.set(key, value);
   return new Response(response.body, { status: response.status, headers });
 }
 
 export function listenHttp(config: Config, host: string, port: number): Promise<void> {
+  if (!loopbackHost(host)) {
+    return Promise.reject(
+      new Error(
+        "Local HTTP MCP may only bind to localhost. Use https://brainfeather.com/mcp for remote access.",
+      ),
+    );
+  }
   const httpServer = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${host}:${port}`}`);
@@ -81,8 +132,10 @@ export function listenHttp(config: Config, host: string, port: number): Promise<
 
   return new Promise((resolve, reject) => {
     httpServer.once("error", reject);
-    httpServer.listen(port, host, () => {
-      console.error(`[brainfeather] Streamable HTTP MCP on http://${host}:${port}/mcp`);
+    const bindHost = host === "[::1]" ? "::1" : host;
+    httpServer.listen(port, bindHost, () => {
+      const displayHost = bindHost === "::1" ? "[::1]" : bindHost;
+      console.error(`[brainfeather] Streamable HTTP MCP on http://${displayHost}:${port}/mcp`);
       resolve();
     });
   });
