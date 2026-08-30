@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx -y @brainfeather/mcp@1.5.1 hook recall --format claude",
+            "command": "npx -y @brainfeather/mcp@1.5.2 hook recall --format claude",
             "timeout": 8
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx -y @brainfeather/mcp@1.5.1 hook recall --format claude",
+            "command": "npx -y @brainfeather/mcp@1.5.2 hook recall --format claude",
             "timeout": 8
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx -y @brainfeather/mcp@1.5.1 hook capture --format claude",
+            "command": "npx -y @brainfeather/mcp@1.5.2 hook capture --format claude",
             "timeout": 8
           }
         ]

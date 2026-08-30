@@ -15,7 +15,7 @@ Pin the version so clients do not silently roll back to an older cache:
   "mcpServers": {
     "brainfeather": {
       "command": "npx",
-      "args": ["-y", "@brainfeather/mcp@1.5.1"],
+      "args": ["-y", "@brainfeather/mcp@1.5.2"],
       "env": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
       }
@@ -30,10 +30,11 @@ Then install host adapters so recall and capture do not depend on the model reme
 to call a tool:
 
 ```bash
-npx -y @brainfeather/mcp@1.5.1 init
+npx -y @brainfeather/mcp@1.5.2 init
 ```
 
-That writes fail-open Cursor hooks, a Claude Code plugin, and an OpenCode plugin.
+That writes fail-open Cursor hooks, a Claude Code plugin, and an auto-discovered
+OpenCode plugin under `~/.config/opencode/plugins/`.
 Inferred facts still go to the [review queue](https://brainfeather.com/review). They
 never enter recall until you approve them.
 
@@ -70,8 +71,11 @@ HTTP MCP has no workspace roots. Set `x-brainfeather-project` or
 Local HTTP (same tools as stdio):
 
 ```bash
-npx -y @brainfeather/mcp@1.5.1 --http --port 8787
+npx -y @brainfeather/mcp@1.5.2 --http --port 8787
 ```
+
+The credential-bearing local HTTP server is intentionally loopback-only. Use the
+hosted HTTPS endpoint for remote clients.
 
 ### Claude Code plugin
 
@@ -88,11 +92,10 @@ Then run `/brainfeather:onboard` in a repository to import `AGENTS.md`, `CLAUDE.
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["~/.config/opencode/brainfeather-plugin.mjs"],
-  "mcp": {
+      "mcp": {
     "brainfeather": {
       "type": "local",
-      "command": ["npx", "-y", "@brainfeather/mcp@1.5.1"],
+      "command": ["npx", "-y", "@brainfeather/mcp@1.5.2"],
       "enabled": true,
       "environment": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
@@ -102,8 +105,10 @@ Then run `/brainfeather:onboard` in a repository to import `AGENTS.md`, `CLAUDE.
 }
 ```
 
-`init opencode` copies the plugin file. It injects recalled context into the system
-prompt and queues inferred facts on `session.idle`.
+`init opencode` installs an auto-discovered global plugin. It reads the existing
+Brainfeather MCP environment, derives project scope from the active Git repository,
+injects recalled context into the system prompt, and queues inferred facts on
+`session.idle`.
 
 ## Environment
 

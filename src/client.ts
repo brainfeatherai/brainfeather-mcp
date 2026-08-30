@@ -135,6 +135,7 @@ const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
 type CallOptions = {
   signal?: AbortSignal;
   retry?: boolean;
+  sessionToken?: string | null;
 };
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -171,6 +172,10 @@ export class Client {
     if (token) this.sessionToken = token;
   }
 
+  private clearSession() {
+    this.sessionToken = undefined;
+  }
+
   private async call<Schema extends z.ZodTypeAny>(
     method: string,
     path: string,
@@ -198,12 +203,14 @@ export class Client {
 
       let res: Response;
       try {
+        const sessionToken =
+          options.sessionToken === undefined ? this.sessionToken : options.sessionToken;
         res = await this.fetchImpl(`${this.cfg.apiUrl}${path}`, {
           method,
           headers: {
             Authorization: `Bearer ${this.cfg.apiKey}`,
-            ...(this.sessionToken
-              ? { "x-brainfeather-session": this.sessionToken }
+            ...(sessionToken
+              ? { "x-brainfeather-session": sessionToken }
               : {}),
             ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
           },
@@ -369,13 +376,27 @@ export class Client {
     } = {},
   ) {
     const { retry, ...queryOptions } = options;
-    return this.call(
-      "GET",
-      `/context${this.query({ projectId, strictScope, ...queryOptions })}`,
-      contextResponseSchema,
-      undefined,
-      { signal, retry },
-    ).then((result) => {
+    const request = (sessionToken: string | null | undefined) =>
+      this.call(
+        "GET",
+        `/context${this.query({ projectId, strictScope, ...queryOptions })}`,
+        contextResponseSchema,
+        undefined,
+        { signal, retry, sessionToken },
+      );
+    const sentToken = this.sessionToken;
+    return request(sentToken).catch((error: unknown) => {
+      if (
+        sentToken &&
+        error instanceof ApiError &&
+        error.status === 400 &&
+        /sessionToken is invalid/i.test(error.message)
+      ) {
+        if (this.sessionToken === sentToken) this.clearSession();
+        return request(this.sessionToken ?? null);
+      }
+      throw error;
+    }).then((result) => {
       this.rememberSession(result.sessionToken);
       return result;
     });
@@ -389,18 +410,32 @@ export class Client {
     },
     signal?: AbortSignal,
   ) {
-    return this.call(
-      "POST",
-      "/capture",
-      captureResultSchema,
-      {
-        activity: input.activity,
-        ...(input.projectId ? { projectId: input.projectId } : {}),
-        ...(input.source ? { source: input.source } : {}),
-        ...(this.sessionToken ? { sessionToken: this.sessionToken } : {}),
-      },
-      { signal, retry: false },
-    ).then((result) => {
+    const request = (sessionToken: string | null | undefined) =>
+      this.call(
+        "POST",
+        "/capture",
+        captureResultSchema,
+        {
+          activity: input.activity,
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+          ...(input.source ? { source: input.source } : {}),
+          ...(sessionToken ? { sessionToken } : {}),
+        },
+        { signal, retry: false, sessionToken },
+      );
+    const sentToken = this.sessionToken;
+    return request(sentToken).catch((error: unknown) => {
+      if (
+        sentToken &&
+        error instanceof ApiError &&
+        error.status === 400 &&
+        /sessionToken is invalid/i.test(error.message)
+      ) {
+        if (this.sessionToken === sentToken) this.clearSession();
+        return request(this.sessionToken ?? null);
+      }
+      throw error;
+    }).then((result) => {
       this.rememberSession(result.sessionToken);
       return result;
     });

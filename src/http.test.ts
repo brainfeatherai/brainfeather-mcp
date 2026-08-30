@@ -14,7 +14,24 @@ describe("handleStreamableRequest", () => {
       config,
     );
     expect(response.status).toBe(204);
-    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("rejects non-loopback hosts and browser origins", async () => {
+    const hostResponse = await handleStreamableRequest(
+      new Request("http://attacker.example/mcp", { method: "OPTIONS" }),
+      config,
+    );
+    expect(hostResponse.status).toBe(403);
+
+    const originResponse = await handleStreamableRequest(
+      new Request("http://127.0.0.1/mcp", {
+        method: "OPTIONS",
+        headers: { origin: "https://attacker.example" },
+      }),
+      config,
+    );
+    expect(originResponse.status).toBe(403);
   });
 
   it("initializes a stateless JSON MCP session", async () => {
@@ -24,6 +41,7 @@ describe("handleStreamableRequest", () => {
         headers: {
           accept: "application/json, text/event-stream",
           "content-type": "application/json",
+          host: "127.0.0.1",
           "x-brainfeather-project": "github.com/acme/app",
         },
         body: JSON.stringify({
@@ -44,6 +62,6 @@ describe("handleStreamableRequest", () => {
       result?: { serverInfo?: { name?: string; version?: string } };
     };
     expect(payload.result?.serverInfo?.name).toBe("brainfeather");
-    expect(payload.result?.serverInfo?.version).toBe("1.5.1");
+    expect(payload.result?.serverInfo?.version).toBe("1.5.2");
   });
 });

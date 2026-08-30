@@ -261,4 +261,58 @@ describe("Client", () => {
     ).rejects.toMatchObject({ retryable: true, status: 504 });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it("renegotiates once when the server rejects an expired session", async () => {
+    const context = {
+      facts: [],
+      decisions: [],
+      patterns: [],
+      counts: { facts: 0, decisions: 0, patterns: 0, total: 0 },
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ ...context, sessionToken: "expired.session.token" }))
+      .mockResolvedValueOnce(json({ error: "sessionToken is invalid." }, { status: 400 }))
+      .mockResolvedValueOnce(json({ ...context, sessionToken: "fresh.session.token" }));
+    const client = new Client(config, fetchMock);
+
+    await client.getContext("project", true);
+    await expect(client.getContext("project", true)).resolves.toMatchObject(context);
+
+    const rejectedHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+    const retriedHeaders = new Headers(fetchMock.mock.calls[2]?.[1]?.headers);
+    expect(rejectedHeaders.get("x-brainfeather-session")).toBe("expired.session.token");
+    expect(retriedHeaders.get("x-brainfeather-session")).toBeNull();
+  });
+
+  it("does not clear a fresh session when a concurrent stale request finishes late", async () => {
+    const context = {
+      facts: [],
+      decisions: [],
+      patterns: [],
+      counts: { facts: 0, decisions: 0, patterns: 0, total: 0 },
+    };
+    let rejectLate!: (value: Response) => void;
+    const late = new Promise<Response>((resolve) => { rejectLate = resolve; });
+    let calls = 0;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) return json({ ...context, sessionToken: "stale.session.token" });
+      if (calls === 2) return late;
+      if (calls === 3) return json({ error: "sessionToken is invalid." }, { status: 400 });
+      if (calls === 4) return json({ ...context, sessionToken: "fresh.session.token" });
+      return json({ ...context, sessionToken: "fresh.session.token" });
+    });
+    const client = new Client(config, fetchMock);
+    await client.getContext("project", true);
+
+    const first = client.getContext("project", true);
+    const second = client.getContext("project", true);
+    await second;
+    rejectLate(json({ error: "sessionToken is invalid." }, { status: 400 }));
+    await first;
+
+    const finalHeaders = new Headers(fetchMock.mock.calls.at(-1)?.[1]?.headers);
+    expect(finalHeaders.get("x-brainfeather-session")).toBe("fresh.session.token");
+  });
 });
