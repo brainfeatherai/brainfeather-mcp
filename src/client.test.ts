@@ -103,6 +103,8 @@ describe("Client", () => {
     const result = await client.searchMemories("how do we handle auth", {
       category: "decision",
       projectId: "github.com/acme/app",
+      branch: "feature/auth",
+      taskId: "task-42",
       limit: 7,
       strictScope: true,
       referenceAt: "2026-01-01T00:00:00.000Z",
@@ -119,6 +121,8 @@ describe("Client", () => {
       q: "how do we handle auth",
       category: "decision",
       projectId: "github.com/acme/app",
+      branch: "feature/auth",
+      taskId: "task-42",
       limit: "7",
       strictScope: "true",
       referenceAt: "2026-01-01T00:00:00.000Z",
@@ -140,6 +144,8 @@ describe("Client", () => {
     await expect(
       client.getContext("github.com/acme/app", true, undefined, {
         query: "deployment",
+        branch: "feature/auth",
+        taskId: "task-42",
         referenceAt: "2026-01-01T00:00:00.000Z",
         maxTokens: 1024,
       }),
@@ -149,6 +155,8 @@ describe("Client", () => {
     expect(Object.fromEntries(requested.searchParams)).toEqual({
       projectId: "github.com/acme/app",
       strictScope: "true",
+      branch: "feature/auth",
+      taskId: "task-42",
       query: "deployment",
       referenceAt: "2026-01-01T00:00:00.000Z",
       maxTokens: "1024",
@@ -247,6 +255,51 @@ describe("Client", () => {
     });
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
       "https://brainfeather.example/api/v1/capture",
+    );
+  });
+
+  it("keeps session tokens isolated by repository, branch, and task", async () => {
+    const context = {
+      facts: [],
+      decisions: [],
+      patterns: [],
+      counts: { facts: 0, decisions: 0, patterns: 0, total: 0 },
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ ...context, sessionToken: "main.task-a.token" }))
+      .mockResolvedValueOnce(json({ ...context, sessionToken: "feature.task-a.token" }))
+      .mockResolvedValueOnce(
+        json({ candidates: 0, queued: 0, saved: 0, duplicates: 0, rejected: 0 }),
+      )
+      .mockResolvedValueOnce(
+        json({ candidates: 0, queued: 0, saved: 0, duplicates: 0, rejected: 0 }),
+      );
+    const client = new Client(config, fetchMock);
+
+    await client.getContext("project", true, undefined, { branch: "main", taskId: "task-a" });
+    await client.getContext("project", true, undefined, {
+      branch: "feature/auth",
+      taskId: "task-a",
+    });
+    await client.captureActivity({
+      activity: "This project uses Vitest for tests.",
+      projectId: "project",
+      branch: "main",
+      taskId: "task-a",
+    });
+    await client.captureActivity({
+      activity: "This project uses Vitest for tests.",
+      projectId: "project",
+      branch: "feature/auth",
+      taskId: "task-a",
+    });
+
+    expect(new Headers(fetchMock.mock.calls[2]?.[1]?.headers).get("x-brainfeather-session")).toBe(
+      "main.task-a.token",
+    );
+    expect(new Headers(fetchMock.mock.calls[3]?.[1]?.headers).get("x-brainfeather-session")).toBe(
+      "feature.task-a.token",
     );
   });
 

@@ -213,7 +213,7 @@ describe("Brainfeather MCP protocol", () => {
   });
 
   it("attributes OpenCode save_memory and queues capture_activity for review", async () => {
-    let savedBody: unknown;
+    const savedBodies: Record<string, unknown>[] = [];
     let capturedBody: unknown;
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = String(input);
@@ -228,7 +228,7 @@ describe("Brainfeather MCP protocol", () => {
           rejected: 0,
         });
       }
-      savedBody = body;
+      savedBodies.push(body);
       return Response.json({
         action: "add",
         id: "memory-opencode",
@@ -257,7 +257,24 @@ describe("Brainfeather MCP protocol", () => {
       },
     });
     expect(saved.isError).not.toBe(true);
-    expect(savedBody).toMatchObject({ source: "opencode" });
+    expect(savedBodies[0]).toMatchObject({ source: "opencode" });
+    expect(savedBodies[0]).not.toHaveProperty("branch");
+    expect(savedBodies[0]).not.toHaveProperty("taskId");
+
+    const scoped = await mcpClient.callTool({
+      name: "save_memory",
+      arguments: {
+        content: "Task authentication uses signed cookies.",
+        category: "decision",
+        scope: "branch-task",
+        taskId: "task-42",
+      },
+    });
+    expect(scoped.isError).not.toBe(true);
+    expect(savedBodies[1]).toMatchObject({
+      branch: expect.any(String),
+      taskId: "task-42",
+    });
 
     const captured = await mcpClient.callTool({
       name: "capture_activity",

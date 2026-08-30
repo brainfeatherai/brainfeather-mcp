@@ -15,7 +15,7 @@ Pin the version so clients do not silently roll back to an older cache:
   "mcpServers": {
     "brainfeather": {
       "command": "npx",
-      "args": ["-y", "@brainfeather/mcp@1.5.2"],
+      "args": ["-y", "@brainfeather/mcp@1.6.0"],
       "env": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
       }
@@ -30,7 +30,7 @@ Then install host adapters so recall and capture do not depend on the model reme
 to call a tool:
 
 ```bash
-npx -y @brainfeather/mcp@1.5.2 init
+npx -y @brainfeather/mcp@1.6.0 init
 ```
 
 That writes fail-open Cursor hooks, a Claude Code plugin, and an auto-discovered
@@ -71,7 +71,7 @@ HTTP MCP has no workspace roots. Set `x-brainfeather-project` or
 Local HTTP (same tools as stdio):
 
 ```bash
-npx -y @brainfeather/mcp@1.5.2 --http --port 8787
+npx -y @brainfeather/mcp@1.6.0 --http --port 8787
 ```
 
 The credential-bearing local HTTP server is intentionally loopback-only. Use the
@@ -95,7 +95,7 @@ Then run `/brainfeather:onboard` in a repository to import `AGENTS.md`, `CLAUDE.
       "mcp": {
     "brainfeather": {
       "type": "local",
-      "command": ["npx", "-y", "@brainfeather/mcp@1.5.2"],
+      "command": ["npx", "-y", "@brainfeather/mcp@1.6.0"],
       "enabled": true,
       "environment": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
@@ -117,6 +117,8 @@ injects recalled context into the system prompt, and queues inferred facts on
 | `BRAINFEATHER_API_KEY` | yes | — |
 | `BRAINFEATHER_API_URL` | no | `https://brainfeather.com/api/v1` |
 | `BRAINFEATHER_PROJECT_ID` | no | resolved from MCP Roots or Git |
+| `BRAINFEATHER_BRANCH` | no | current checked-out Git branch |
+| `BRAINFEATHER_TASK_ID` | no | no active task |
 
 The key is the only credential. It maps to one account, and revoking it from the
 dashboard takes effect on the next request — no redeploy, no shared secret.
@@ -135,6 +137,11 @@ path-hashed ID so unrelated folders with the same name cannot collide. Multi-roo
 fail closed. If the client advertises Roots but cannot list them, Brainfeather falls back
 to the process working directory when that directory is a recognizable project. Clients
 with no Roots support still need `BRAINFEATHER_PROJECT_ID`.
+
+Reads automatically include repository defaults plus memories for the checked-out Git
+branch. Pass `taskId` to a tool, or set `BRAINFEATHER_TASK_ID`, to include that task's
+overlay too. Detached HEAD and non-Git workspaces use repository scope unless
+`BRAINFEATHER_BRANCH` is set explicitly.
 
 Only HTTPS API URLs are accepted, except `http://localhost` for local development. If the
 config file is readable by other users, startup warns you to run
@@ -161,6 +168,14 @@ task-relevant, point-in-time context within a prompt budget. `search_memory` acc
 `referenceAt` for historical truth. `save_memory` can attach validity intervals,
 temporal type, confidence, and evidence provenance such as a commit, file, issue, PR, or
 deployment. Existing calls need no changes.
+
+`get_context`, `search_memory`, `list_entities`, `traverse_graph`, and
+`capture_activity` accept an optional `taskId`; their branch comes from the current Git
+checkout. `save_memory` remains repository-scoped by default so a convention recorded on
+`main` does not become main-only. Set its `scope` to `branch`, `task`, or `branch-task`
+when the fact is an overlay. `forget_memory` uses the same explicit scope vocabulary.
+Host recall and inferred capture automatically follow the checked-out branch and configured
+task. Session tokens are isolated per repository/branch/task scope.
 
 File evidence is hashed locally before saving; Brainfeather receives the relative path and
 SHA-256 digest, never the file contents. Recalled file and commit evidence is checked against

@@ -96,6 +96,16 @@ export function detectProject(workspacePath = process.cwd()): string | null {
   return fitProjectId(`local/${name}~${digest(identityPath)}`);
 }
 
+/** Return the checked-out branch without inventing a name for detached HEADs. */
+export function detectBranch(workspacePath = process.cwd()): string | null {
+  const branch = git(resolve(workspacePath), ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  return branch &&
+    branch.length <= 128 &&
+    /^[\x20-\x21\x23-\x5b\x5d-\x7e]+$/.test(branch)
+    ? branch
+    : null;
+}
+
 function rootPath(uri: string): string | null {
   try {
     const parsed = new URL(uri);

@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  detectBranch,
   detectProject,
   normalizeRemote,
   ProjectResolver,
@@ -74,6 +75,21 @@ describe("detectProject", () => {
     expect(firstId).toMatch(/^local\/app~/);
     expect(secondId).toMatch(/^local\/app~/);
     expect(firstId).not.toBe(secondId);
+  });
+});
+
+describe("detectBranch", () => {
+  it("returns the checked-out branch and fails open for detached HEAD", () => {
+    const root = mkdtempSync(join(tmpdir(), "brainfeather-branch-"));
+    temporaryPaths.push(root);
+    execFileSync("git", ["init", "-q", "-b", "feature/auth"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Brainfeather Test"], { cwd: root });
+    execFileSync("git", ["commit", "--allow-empty", "-q", "-m", "initial"], { cwd: root });
+
+    expect(detectBranch(root)).toBe("feature/auth");
+    execFileSync("git", ["checkout", "--detach", "-q"], { cwd: root });
+    expect(detectBranch(root)).toBeNull();
   });
 });
 
