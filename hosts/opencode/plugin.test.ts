@@ -16,7 +16,7 @@ describe("OpenCode plugin", () => {
   it("derives repository scope and sends it to recall and capture", async () => {
     const root = mkdtempSync(join(tmpdir(), "brainfeather-opencode-"));
     temporaryPaths.push(root);
-    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["init", "-q", "-b", "feature/auth"], { cwd: root });
     execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/app.git"], {
       cwd: root,
     });
@@ -31,7 +31,10 @@ describe("OpenCode plugin", () => {
           data: {
             mcp: {
               brainfeather: {
-                environment: { BRAINFEATHER_API_KEY: "bf_test_1234567890abcdef" },
+                environment: {
+                  BRAINFEATHER_API_KEY: "bf_test_1234567890abcdef",
+                  BRAINFEATHER_TASK_ID: "task-42",
+                },
               },
             },
           },
@@ -66,8 +69,15 @@ describe("OpenCode plugin", () => {
 
     const recall = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(recall.searchParams.get("projectId")).toBe("github.com/acme/app");
+    expect(recall.searchParams.get("branch")).toBe("feature/auth");
+    expect(recall.searchParams.get("taskId")).toBe("task-42");
     const capture = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-    expect(capture).toMatchObject({ projectId: "github.com/acme/app", source: "opencode" });
+    expect(capture).toMatchObject({
+      projectId: "github.com/acme/app",
+      branch: "feature/auth",
+      taskId: "task-42",
+      source: "opencode",
+    });
     expect(client.session.messages).toHaveBeenCalledWith({ path: { id: "session-1" } });
   });
 
@@ -95,5 +105,41 @@ describe("OpenCode plugin", () => {
     await hooks["experimental.chat.system.transform"]({}, { system: ["base"] });
     const recall = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(recall.searchParams.get("projectId")).toBe("git.example:2222/team/app");
+  });
+
+  it("falls back to repository scope on detached HEAD", async () => {
+    const root = mkdtempSync(join(tmpdir(), "brainfeather-opencode-detached-"));
+    temporaryPaths.push(root);
+    execFileSync("git", ["init", "-q", "-b", "feature/auth"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Brainfeather Test"], { cwd: root });
+    execFileSync("git", ["commit", "--allow-empty", "-q", "-m", "initial"], { cwd: root });
+    execFileSync("git", ["checkout", "--detach", "-q"], { cwd: root });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ facts: [], decisions: [], patterns: [], counts: { total: 0 } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = {
+      config: {
+        get: vi.fn().mockResolvedValue({
+          data: {
+            mcp: {
+              brainfeather: {
+                environment: {
+                  BRAINFEATHER_API_KEY: "bf_test_1234567890abcdef",
+                  BRAINFEATHER_PROJECT_ID: "github.com/acme/app",
+                },
+              },
+            },
+          },
+        }),
+      },
+    };
+
+    const hooks = await BrainfeatherPlugin({ directory: root, client });
+    await hooks["experimental.chat.system.transform"]({}, { system: ["base"] });
+    const recall = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(recall.searchParams.get("projectId")).toBe("github.com/acme/app");
+    expect(recall.searchParams.has("branch")).toBe(false);
   });
 });

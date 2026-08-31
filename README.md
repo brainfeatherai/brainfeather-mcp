@@ -15,7 +15,7 @@ Pin the version so clients do not silently roll back to an older cache:
   "mcpServers": {
     "brainfeather": {
       "command": "npx",
-      "args": ["-y", "@brainfeather/mcp@1.6.0"],
+      "args": ["-y", "@brainfeather/mcp@1.6.1"],
       "env": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
       }
@@ -30,7 +30,7 @@ Then install host adapters so recall and capture do not depend on the model reme
 to call a tool:
 
 ```bash
-npx -y @brainfeather/mcp@1.6.0 init
+npx -y @brainfeather/mcp@1.6.1 init
 ```
 
 That writes fail-open Cursor hooks, a Claude Code plugin, and an auto-discovered
@@ -71,7 +71,7 @@ HTTP MCP has no workspace roots. Set `x-brainfeather-project` or
 Local HTTP (same tools as stdio):
 
 ```bash
-npx -y @brainfeather/mcp@1.6.0 --http --port 8787
+npx -y @brainfeather/mcp@1.6.1 --http --port 8787
 ```
 
 The credential-bearing local HTTP server is intentionally loopback-only. Use the
@@ -95,7 +95,7 @@ Then run `/brainfeather:onboard` in a repository to import `AGENTS.md`, `CLAUDE.
       "mcp": {
     "brainfeather": {
       "type": "local",
-      "command": ["npx", "-y", "@brainfeather/mcp@1.6.0"],
+      "command": ["npx", "-y", "@brainfeather/mcp@1.6.1"],
       "enabled": true,
       "environment": {
         "BRAINFEATHER_API_KEY": "bf_live_your_key_here"
