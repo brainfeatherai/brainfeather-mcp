@@ -6,6 +6,8 @@ import { basename, join, resolve } from "node:path";
 
 const MIN_ACTIVITY = 24;
 const MAX_PROJECT_ID = 64;
+const MAX_SCOPE_ID = 128;
+const SCOPE_ID = /^[\x20-\x21\x23-\x5b\x5d-\x7e]+$/;
 
 function jsonFile(path) {
   try {
@@ -72,6 +74,21 @@ function detectProject(directory) {
     : undefined;
 }
 
+function validScopeId(value) {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_SCOPE_ID &&
+    SCOPE_ID.test(value)
+    ? value
+    : undefined;
+}
+
+function detectBranch(directory) {
+  return validScopeId(
+    git(resolve(directory || process.cwd()), ["symbolic-ref", "--quiet", "--short", "HEAD"]),
+  );
+}
+
 function loadSettings(config = {}) {
   const file = jsonFile(join(homedir(), ".brainfeather", "config.json"));
   const mcp = config?.mcp?.brainfeather?.environment ?? {};
@@ -86,6 +103,23 @@ function loadSettings(config = {}) {
     ),
     projectId:
       env.BRAINFEATHER_PROJECT_ID || file.projectId || mcp.BRAINFEATHER_PROJECT_ID,
+    branch: validScopeId(
+      env.BRAINFEATHER_BRANCH || file.branch || mcp.BRAINFEATHER_BRANCH,
+    ),
+    taskId: validScopeId(
+      env.BRAINFEATHER_TASK_ID || file.taskId || mcp.BRAINFEATHER_TASK_ID,
+    ),
+  };
+}
+
+function activeScope(directory, settings) {
+  const projectId = settings.projectId || detectProject(directory);
+  if (!projectId) return null;
+  const branch = settings.branch || detectBranch(directory);
+  return {
+    projectId,
+    ...(branch ? { branch } : {}),
+    ...(settings.taskId ? { taskId: settings.taskId } : {}),
   };
 }
 
@@ -151,11 +185,16 @@ export default async function BrainfeatherPlugin(input = {}) {
   return {
     "experimental.chat.system.transform": async (_input, output) => {
       try {
-        const projectId = settings.projectId || detectProject(directory);
-        if (!projectId) return;
+        const scope = activeScope(directory, settings);
+        if (!scope) return;
+        const query = new URLSearchParams({
+          maxTokens: "1200",
+          strictScope: "true",
+          ...scope,
+        });
         const ctx = await api(
           "GET",
-          `context?maxTokens=1200&strictScope=true&projectId=${encodeURIComponent(projectId)}`,
+          `context?${query}`,
           undefined,
           settings,
         );
@@ -175,9 +214,9 @@ export default async function BrainfeatherPlugin(input = {}) {
           await client.session.messages({ path: { id: sessionID } }),
         );
         if (activity.length < MIN_ACTIVITY) return;
-        const projectId = settings.projectId || detectProject(directory);
-        if (!projectId) return;
-        await api("POST", "capture", { activity, projectId }, settings);
+        const scope = activeScope(directory, settings);
+        if (!scope) return;
+        await api("POST", "capture", { activity, ...scope }, settings);
       } catch {
         /* fail open */
       }

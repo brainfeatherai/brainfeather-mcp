@@ -62,6 +62,6 @@ describe("handleStreamableRequest", () => {
       result?: { serverInfo?: { name?: string; version?: string } };
     };
     expect(payload.result?.serverInfo?.name).toBe("brainfeather");
-    expect(payload.result?.serverInfo?.version).toBe("1.6.0");
+    expect(payload.result?.serverInfo?.version).toBe("1.6.1");
   });
 });
